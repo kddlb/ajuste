@@ -1,6 +1,6 @@
 [Desktop Entry]
 Type=Application
-Name=ajuste
+Name=Ajuste
 Comment=Fractal Scape headset tray icon and battery alerts
 Exec=ajuste --hidden
 Icon=audio-headphones

@@ -425,9 +425,18 @@ fn print_status(dev: &Scape, json: bool) -> Result<()> {
     Ok(())
 }
 
-/// Re-read state after a setter and report whether it took effect.
+/// Re-read state after a setter and report whether it took effect. Over USB the state can
+/// trail the command by ~70 ms (ENC), so poll for up to ~0.5 s before giving up.
 fn confirm(dev: &Scape, ok: impl Fn(&scape_proto::HeadsetState) -> bool, what: &str) -> Result<()> {
-    let st = dev.status()?.headset.context("headset disconnected")?;
+    let mut st = dev.status()?.headset.context("headset disconnected")?;
+    for _ in 0..10 {
+        if ok(&st) {
+            println!("{what}: confirmed by device state");
+            return Ok(());
+        }
+        std::thread::sleep(Duration::from_millis(50));
+        st = dev.status()?.headset.context("headset disconnected")?;
+    }
     if ok(&st) {
         println!("{what}: confirmed by device state");
         Ok(())

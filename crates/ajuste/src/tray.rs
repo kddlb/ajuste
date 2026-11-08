@@ -8,6 +8,7 @@ use ksni::{MenuItem, ToolTip};
 #[derive(Debug, Clone)]
 pub enum AppMsg {
     OpenWindow,
+    About,
     SetEnc(bool),
     SetLights(bool),
     SelectEq(u8),
@@ -85,7 +86,7 @@ impl ksni::Tray for ScapeTray {
             .into(),
             MenuItem::Separator,
             StandardItem {
-                label: "Open ajuste".into(),
+                label: "Open Ajuste".into(),
                 icon_name: "audio-headphones".into(),
                 activate: Box::new(|t: &mut Self| t.send(AppMsg::OpenWindow)),
                 ..Default::default()
@@ -121,6 +122,13 @@ impl ksni::Tray for ScapeTray {
             }
             .into(),
             MenuItem::Separator,
+            StandardItem {
+                label: "About Ajuste".into(),
+                icon_name: "help-about".into(),
+                activate: Box::new(|t: &mut Self| t.send(AppMsg::About)),
+                ..Default::default()
+            }
+            .into(),
             StandardItem {
                 label: "Quit".into(),
                 icon_name: "application-exit".into(),

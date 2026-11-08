@@ -1,4 +1,4 @@
-# ajuste
+# Ajuste
 
 Native Linux control for the **Fractal Scape** wireless headset, replacing Fractal's
 Chrome-only (WebHID) Adjust Pro web app.
@@ -85,17 +85,21 @@ MIT OR Apache-2.0, at your option.
 INITIALIZE/SHUTDOWN, lighting streaming, boot/timestamp effects, or uploads to any slot other than 1.
 A unit test enforces this.
 
-## Hardware verification checklist
+## Hardware status
 
-Every command was derived from Fractal's JavaScript and none has been sent to a device
-yet. Check them in this order:
+Tested on a real Fractal Scape (dongle firmware 3.33.0, headset firmware 3.48.0), both through the 2.4 GHz dongle and over USB-C.
+Every feature Ajuste exposes has been sent to the device and its result confirmed, by reading the
+state back and by ear or eye:
 
-1. `ajustectl --hex status`: does the battery % match? Toggle mute and the boom mic and
-   re-run to confirm bytes 3 and 4.
-2. `ajustectl info`, then `ajustectl eq show`: slots should look like Balance, Clarity
-   and Depth.
-3. `enc on/off`, then `eq select 1..3`, then `sidetone on --level 50` and `sidetone off`.
-   Each command re-reads the state to confirm. The app never sends sidetone Disable
-   (`F1 34 00`), so check that one with extra care.
-4. `eq apply 1 --preset depth`: it should be audible and should be gone after a power
-   cycle. Only after that, try `--save`.
+| Feature | Status |
+|---|---|
+| Status: battery, mic boom, mute, EQ slot, sidetone, ENC, lights | ✅ |
+| Firmware and serial numbers | ✅ |
+| ENC on/off, sidetone on/off and level, EQ slot select | ✅ |
+| Headset EQ: read, live preview, save | ✅ Tested on a spare slot |
+| Lighting: on/off, read the stored effect, upload 17 presets | ✅ Byte-identical to Adjust Pro's uploads |
+| Physical buttons, dock, Bluetooth mode, power-off | ✅ Reflected in state; see FINDINGS §6 |
+| Mic EQ | ❌ Stored by the headset but no audible effect; removed |
+| Wired USB-C mode (`36bc:2001`) | ✅ Reads, settings and lighting upload; see FINDINGS §9 |
+
+[`FINDINGS.md`](FINDINGS.md) has the protocol and test details (§6–9).

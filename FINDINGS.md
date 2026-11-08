@@ -3,8 +3,9 @@
 Gathered 2026-11-08. Goal: control/read the Fractal Scape wireless headset from Linux
 (battery, mute, EQ, sidetone, ANC…) without Fractal's web app.
 
-Nothing below has been sent to the device yet — the protocol was derived by reading
-Fractal's web configurator source. Verify each command before relying on it.
+The protocol was first derived by reading Fractal's web configurator source (§1–5). It has since
+been **verified on hardware** (§6) and against live WebHID captures of Adjust Pro (§7–8). Where §3
+disagrees with §6, §6 is right. Wired USB-C mode (PID 0x2001) is covered in §9.
 
 ## 1. The USB device
 
@@ -100,8 +101,8 @@ dongle's HID device and uses headset device-type bytes (0xF1, 0xA7…). Dongle-o
 **Headset state** `F1 21` → response bytes:
 | Byte | Field |
 |---|---|
-| 3 | boom mic attached (0 = yes) |
-| 4 | muted (0 = yes) |
+| 3 | boom mic attached (**1 = yes**, verified §6) |
+| 4 | muted (**1 = yes**, verified §6) |
 | 5 | selected EQ slot |
 | 6 | selected lighting slot |
 | 7 (8) | chat volume (app's high-byte read uses `>>8` → always 0; bug) |
@@ -257,7 +258,7 @@ Captured by wrapping `HIDDevice.prototype.sendReport` and listening for `inputre
     ID**. Opening a slot's tab does the same. So the app writes flash on every visit, and slot IDs change
     constantly (slot 1 went `Sv7n2o…` → `6fb85603-…` → `l6KtEmk…`).
 - **Selecting a slot tab** sends `A7 07 n`. The device **does reply** to this (status 0), even though the bundle marks
-  it as no-response. The app ignores the reply, and ajuste's drain-before-send makes it harmless.
+  it as no-response. The app ignores the reply, and Ajuste's drain-before-send makes it harmless.
 - **Editing:** each change sends `A7 01` + `A7 02`×n + `A7 03 slot 01` (live), reusing the slot's current ID.
   **Save** is the same sequence with mode 2.
 - **COMMIT reply:** `A7 03 00 <slot> 00 00 00 01 00 <x> 00 <y> 00 90 6b 00 22`, then bytes that change every call.
@@ -291,3 +292,19 @@ data = A5 5A <frames> FF <fps=20> <secs> <[preset, mode, speed, colours…, extr
 - Renderers ported: still, shift, two-colour fade. They use tinycolor `mix` = `round(a + (b − a)·p)` per channel, and JS
   `Math.round`. Not yet ported: breathe, meshify, lava lamp, wave ripple, torrent, radius.
 - Adjust Pro uses the `A4 01` / `A4 02` uploads for the headset (not the timestamp variant `A4 11–13`).
+
+## 9. Wired USB-C mode (verified, 2026-11-08)
+
+- The headset enumerates as `36bc:2001` "Fractal Scape Headset" (bcdDevice 3.30; the USB serial is the headset's own S/N),
+  with UAC1 audio and HID interfaces. Its HID report descriptor has the same layout as the dongle's: consumer `0x0C`,
+  vendor `0xFF13` (reports 6/7), telephony `0x05`, and P911 on page `0xFF00`, report `0x02`, 63 bytes.
+- There's no `11 21` step: `F1 21` answers directly. Differences from the radio path:
+  - b18 (BT connection) reads **0** (1 through the dongle).
+  - b7 reads `0x1a`; it's still unexplained.
+  - `F1 05` (BT address) returns data; through the dongle Adjust Pro got status 1.
+- Verified over USB: status, info, EQ read, ENC, EQ slot select, lights on/off, sidetone level, and lighting
+  upload/read-back. The headset beeps on each change. EQ and mic writes weren't re-tested over USB; they use the same
+  commands as over the radio.
+- **Timing:** replies take about 1 ms, versus ~40 ms over the radio. A full lighting upload takes 0.07–0.19 s (versus about 4 s
+  through the dongle). The ENC state bit trails the `F1 36` reply by about **70 ms**, so `ajustectl` re-polls for up to
+  0.5 s before reporting that a change failed. Through the dongle the radio round trip hides this.

@@ -16,6 +16,64 @@ pub struct Config {
     pub start_hidden: bool,
     /// Headset EQ presets saved from the editor.
     pub presets: Vec<UserPreset>,
+    /// Which desktop notifications to show.
+    pub notifications: Notifications,
+}
+
+/// Per-category notification switches (`[notifications]` in config.toml). The "headset"
+/// ones fire only for changes made on the headset itself, not from ajuste.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct Notifications {
+    pub connection: bool,
+    pub battery: bool,
+    pub mute: bool,
+    pub enc: bool,
+    pub eq_slot: bool,
+    pub lights: bool,
+    pub boom: bool,
+}
+
+impl Default for Notifications {
+    fn default() -> Self {
+        Notifications {
+            connection: true,
+            battery: true,
+            mute: true,
+            enc: true,
+            eq_slot: true,
+            lights: true,
+            boom: true,
+        }
+    }
+}
+
+impl Notifications {
+    pub fn enabled(&self, kind: crate::notify::Kind) -> bool {
+        use crate::notify::Kind::*;
+        match kind {
+            Connection => self.connection,
+            Battery => self.battery,
+            Mute => self.mute,
+            Enc => self.enc,
+            EqSlot => self.eq_slot,
+            Lights => self.lights,
+            Boom => self.boom,
+        }
+    }
+
+    pub fn set(&mut self, kind: crate::notify::Kind, on: bool) {
+        use crate::notify::Kind::*;
+        *match kind {
+            Connection => &mut self.connection,
+            Battery => &mut self.battery,
+            Mute => &mut self.mute,
+            Enc => &mut self.enc,
+            EqSlot => &mut self.eq_slot,
+            Lights => &mut self.lights,
+            Boom => &mut self.boom,
+        } = on;
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -32,6 +90,7 @@ impl Default for Config {
             critical_battery: 10,
             start_hidden: false,
             presets: Vec::new(),
+            notifications: Notifications::default(),
         }
     }
 }

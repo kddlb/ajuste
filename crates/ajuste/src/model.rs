@@ -6,8 +6,9 @@ use scape_proto::HeadsetState;
 use scape_proto::lighting::Effect;
 
 use crate::config::Config;
-use crate::notify::{self, BatteryAlerts};
+use crate::notify::{self, BatteryAlerts, Kind};
 use crate::tray::{TrayHandle, TrayState};
+use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Link {
@@ -25,12 +26,17 @@ pub struct DeviceModel {
     pub last_error: Option<String>,
     /// Effect stored in lighting slot 1, read once per connection.
     pub effect: Option<Effect>,
-    /// A lighting upload is in flight (~4 s).
+    /// Firmware/serial info, read once per headset connection (for the About dialog).
+    pub dongle_info: Option<scape_proto::Info>,
+    pub headset_info: Option<scape_proto::Info>,
+    /// A lighting upload is in flight (~4 s via the dongle, <0.2 s over USB).
     pub uploading: bool,
     /// Number of in-flight device jobs (for spinners).
     pub busy: usize,
     tray: Option<TrayHandle>,
     alerts: BatteryAlerts,
+    /// Changes ajuste itself just requested, so they aren't reported as headset-side changes.
+    expected: Vec<(Kind, Instant)>,
     fake_battery: Option<u8>,
     _events: Task<()>,
 }
@@ -57,10 +63,13 @@ impl DeviceModel {
             config,
             last_error: None,
             effect: None,
+            dongle_info: None,
+            headset_info: None,
             uploading: false,
             busy: 0,
             tray,
             alerts: BatteryAlerts::default(),
+            expected: Vec::new(),
             fake_battery,
             _events: task,
         }
@@ -73,8 +82,72 @@ impl DeviceModel {
         }
     }
 
+    /// Show a notification if its category is enabled.
+    fn notify(&self, kind: Kind, summary: String, body: Option<String>, urgent: bool) {
+        if self.config.notifications.enabled(kind) {
+            notify::show(kind, summary, body, urgent);
+        }
+    }
+
+    /// Remember that ajuste is about to cause a `kind` change (window or tray action).
+    pub fn expect(&mut self, kind: Kind) {
+        self.expected.push((kind, Instant::now()));
+    }
+
+    /// True if this change was caused by ajuste within the last few seconds (consumes it).
+    fn was_expected(&mut self, kind: Kind) -> bool {
+        // Uploads take ~4 s and the next poll up to 1.5 s more.
+        const WINDOW: Duration = Duration::from_secs(8);
+        self.expected.retain(|(_, t)| t.elapsed() < WINDOW);
+        match self.expected.iter().position(|(k, _)| *k == kind) {
+            Some(i) => {
+                self.expected.remove(i);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Notify about changes the wearer made on the headset itself.
+    fn report_headset_changes(
+        &mut self,
+        old: &HeadsetState,
+        new: &HeadsetState,
+        cx: &mut Context<Self>,
+    ) {
+        for change in notify::diff(old, new) {
+            let kind = change.kind();
+            if self.was_expected(kind) || !self.config.notifications.enabled(kind) {
+                continue;
+            }
+            if let notify::Change::EqSlot(slot) = change {
+                // Name the slot's preset: built-in, one saved in ajuste, or unnamed.
+                let user = self.config.presets.clone();
+                self.run(
+                    cx,
+                    move |d| d.read_eq(slot),
+                    move |m, eq, _| {
+                        let name = eq.preset_uid.as_deref().and_then(|uid| {
+                            scape_proto::eq::preset_by_uid(uid)
+                                .map(|p| p.name.to_string())
+                                .or_else(|| {
+                                    user.iter().find(|p| p.uid == uid).map(|p| p.name.clone())
+                                })
+                        });
+                        let (summary, body) = change.message(name.as_deref());
+                        m.notify(kind, summary, body, false);
+                    },
+                );
+            } else {
+                let (summary, body) = change.message(None);
+                self.notify(kind, summary, body, false);
+            }
+        }
+    }
+
     fn on_event(&mut self, ev: DeviceEvent, cx: &mut Context<Self>) {
         let was_ready = self.headset().is_some();
+        let old_state = self.headset().copied();
         let old_light = self.headset().map(|h| h.lighting_slot);
         self.link = match ev {
             DeviceEvent::Connected { kind, .. } => Link::HeadsetAway(kind),
@@ -98,15 +171,32 @@ impl DeviceModel {
         } else if !ready {
             self.effect = None;
         }
-        if ready != was_ready && !matches!(self.link, Link::Absent(_)) {
-            notify::show(
-                if ready {
-                    "Headset connected".into()
-                } else {
-                    "Headset disconnected".into()
+        if ready && !was_ready {
+            self.run(
+                cx,
+                |d| {
+                    let dongle = match d.kind() {
+                        DeviceKind::Dongle => d.info(scape_proto::Target::Dongle).ok(),
+                        DeviceKind::WiredHeadset => None,
+                    };
+                    Ok((dongle, d.info(scape_proto::Target::Headset).ok()))
                 },
-                false,
+                |m, (dongle, headset), _| {
+                    m.dongle_info = dongle;
+                    m.headset_info = headset;
+                },
             );
+        }
+        if ready != was_ready && !matches!(self.link, Link::Absent(_)) {
+            let summary = if ready {
+                "Headset connected"
+            } else {
+                "Headset disconnected"
+            };
+            self.notify(Kind::Connection, summary.into(), None, false);
+        }
+        if let (Some(old), Some(new)) = (old_state, self.headset().copied()) {
+            self.report_headset_changes(&old, &new, cx);
         }
         if let Some(h) = self.headset()
             && let Some((msg, urgent)) = self.alerts.update(
@@ -115,7 +205,7 @@ impl DeviceModel {
                 self.config.critical_battery,
             )
         {
-            notify::show(msg, urgent);
+            self.notify(Kind::Battery, msg, None, urgent);
         }
         self.sync_tray();
         cx.notify();
@@ -178,6 +268,9 @@ impl DeviceModel {
             return;
         }
         self.uploading = true;
+        if self.headset().is_some_and(|h| h.lighting_slot == 0) {
+            self.expect(Kind::Lights); // the upload selects slot 1, turning lights on
+        }
         cx.notify();
         let worker = self.worker.clone();
         cx.spawn(async move |this, cx| {
@@ -203,14 +296,17 @@ impl DeviceModel {
     }
 
     pub fn set_lights(&mut self, on: bool, cx: &mut Context<Self>) {
+        self.expect(Kind::Lights);
         self.exec(cx, move |d| d.set_lights(on));
     }
 
     pub fn set_enc(&mut self, on: bool, cx: &mut Context<Self>) {
+        self.expect(Kind::Enc);
         self.exec(cx, move |d| d.set_enc(on));
     }
 
     pub fn select_eq(&mut self, slot: u8, cx: &mut Context<Self>) {
+        self.expect(Kind::EqSlot);
         self.exec(cx, move |d| d.select_eq(slot));
     }
 

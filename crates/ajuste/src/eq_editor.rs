@@ -175,6 +175,10 @@ impl EqEditor {
         let worker = self.worker(cx);
         let (slot, profile) = (self.slot, self.profile.clone());
         let active = self.model.read(cx).headset().map(|h| h.eq_slot);
+        if active != Some(slot) {
+            self.model
+                .update(cx, |m, _| m.expect(crate::notify::Kind::EqSlot));
+        }
         // Dropping the previous task cancels it: only the last edit in the window is sent.
         self.live_task = Some(cx.spawn(async move |this, cx| {
             cx.background_executor().timer(LIVE_DEBOUNCE).await;

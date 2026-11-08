@@ -1,5 +1,6 @@
 //! ajuste — Fractal Scape control panel with tray icon and battery alerts.
 
+mod about;
 mod config;
 mod curve;
 mod eq_editor;
@@ -40,17 +41,21 @@ fn parse_args() -> Args {
     args
 }
 
-/// Handle to the (single) main window, if open.
+/// Handle to the (single) main window and its view, if open.
 #[derive(Default)]
-struct MainWindow(Option<AnyWindowHandle>);
+struct MainWindow(Option<(AnyWindowHandle, Entity<MainView>)>);
 impl Global for MainWindow {}
 
-fn open_main(model: Entity<DeviceModel>, cx: &mut App) {
-    if let Some(h) = cx.global::<MainWindow>().0
+/// Show the main window (opening it if needed) and return its handle and view.
+fn open_main(
+    model: Entity<DeviceModel>,
+    cx: &mut App,
+) -> Option<(AnyWindowHandle, Entity<MainView>)> {
+    if let Some((h, view)) = cx.global::<MainWindow>().0.clone()
         && h.update(cx, |_, window, _| window.activate_window())
             .is_ok()
     {
-        return;
+        return Some((h, view));
     }
     let options = WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
@@ -59,7 +64,7 @@ fn open_main(model: Entity<DeviceModel>, cx: &mut App) {
             cx,
         ))),
         titlebar: Some(TitlebarOptions {
-            title: Some("ajuste — Fractal Scape".into()),
+            title: Some("Ajuste — Fractal Scape".into()),
             ..Default::default()
         }),
         app_id: Some("ajuste".into()),
@@ -68,8 +73,14 @@ fn open_main(model: Entity<DeviceModel>, cx: &mut App) {
     match gpui_kit::open_window(options, cx, |window, cx| {
         cx.new(|cx| MainView::new(model, window, cx))
     }) {
-        Ok((handle, _)) => cx.global_mut::<MainWindow>().0 = Some(handle),
-        Err(e) => log::error!("failed to open window: {e}"),
+        Ok((handle, view)) => {
+            cx.global_mut::<MainWindow>().0 = Some((handle, view.clone()));
+            Some((handle, view))
+        }
+        Err(e) => {
+            log::error!("failed to open window: {e}");
+            None
+        }
     }
 }
 
@@ -92,17 +103,16 @@ fn main() {
         .run(move |cx| {
             gpui_kit::init(cx);
             cx.set_global(MainWindow::default());
+            // GPUI quits on Linux when the last window closes; with a tray icon the app must
+            // keep running (Quit lives in the tray menu). Without a tray, keep that default.
+            cx.set_quit_mode(if has_tray {
+                QuitMode::Explicit
+            } else {
+                QuitMode::LastWindowClosed
+            });
 
             let model =
                 cx.new(|cx| DeviceModel::new(worker, events, config, tray, args.fake_battery, cx));
-
-            // Without a tray there is no way back once the window closes, so quit then.
-            cx.on_window_closed(move |cx, _| {
-                if !has_tray && cx.windows().is_empty() {
-                    cx.quit();
-                }
-            })
-            .detach();
 
             // Tray → app messages.
             let m = model.clone();
@@ -110,7 +120,16 @@ fn main() {
                 while let Ok(msg) = app_rx.recv().await {
                     let m = m.clone();
                     cx.update(|cx| match msg {
-                        AppMsg::OpenWindow => open_main(m, cx),
+                        AppMsg::OpenWindow => {
+                            open_main(m, cx);
+                        }
+                        AppMsg::About => {
+                            if let Some((h, view)) = open_main(m, cx) {
+                                let _ = h.update(cx, |_, window, cx| {
+                                    view.update(cx, |v, cx| v.open_about(window, cx))
+                                });
+                            }
+                        }
                         AppMsg::SetEnc(on) => m.update(cx, |m, cx| m.set_enc(on, cx)),
                         AppMsg::SetLights(on) => m.update(cx, |m, cx| m.set_lights(on, cx)),
                         AppMsg::SelectEq(slot) => m.update(cx, |m, cx| m.select_eq(slot, cx)),

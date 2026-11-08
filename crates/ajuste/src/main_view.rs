@@ -1,6 +1,7 @@
 //! Main window: status header + Device / EQ tabs.
 
-use gpui_kit::component::button::Button;
+use gpui_kit::component::WindowExt;
+use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::progress::Progress;
 use gpui_kit::component::slider::{Slider, SliderEvent, SliderState};
 use gpui_kit::component::switch::Switch;
@@ -92,6 +93,17 @@ impl MainView {
         }
     }
 
+    /// Open the About dialog (also reachable from the tray menu).
+    pub fn open_about(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let model = self.model.clone();
+        window.open_dialog(cx, move |dialog, _, cx| {
+            dialog
+                .title("About Ajuste")
+                .width(px(460.))
+                .child(crate::about::content(model.read(cx), cx))
+        });
+    }
+
     fn render_header(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let m = self.model.read(cx);
         let theme = cx.theme();
@@ -128,10 +140,23 @@ impl MainView {
             .border_b_1()
             .border_color(theme.border)
             .child(
-                div()
-                    .text_lg()
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .child(title),
+                h_flex()
+                    .justify_between()
+                    .child(
+                        div()
+                            .text_lg()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child(title),
+                    )
+                    .child(
+                        Button::new("about")
+                            .label("About")
+                            .ghost()
+                            .xsmall()
+                            .on_click(
+                                cx.listener(|this, _, window, cx| this.open_about(window, cx)),
+                            ),
+                    ),
             )
             .child(
                 div()
@@ -193,13 +218,58 @@ impl MainView {
                     ))),
             )
             .when(uploading, |d| {
-                d.child(
-                    div()
-                        .text_xs()
-                        .text_color(muted)
-                        .child("Uploading effect… (about 4 s)"),
-                )
+                d.child(div().text_xs().text_color(muted).child("Uploading effect…"))
             })
+    }
+
+    fn render_notifications(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        use crate::notify::Kind;
+        let n = self.model.read(cx).config.notifications;
+        let muted = cx.theme().muted_foreground;
+        let row = |kind: Kind, title: &'static str, desc: &'static str, cx: &mut Context<Self>| {
+            h_flex()
+                .gap_4()
+                .child(
+                    v_flex()
+                        .gap_0p5()
+                        .flex_1()
+                        .child(div().font_weight(FontWeight::MEDIUM).child(title))
+                        .child(div().text_xs().text_color(muted).child(desc)),
+                )
+                .child(
+                    Switch::new(SharedString::from(format!("notify-{kind:?}")))
+                        .checked(n.enabled(kind))
+                        .on_click(cx.listener(move |this, on: &bool, _, cx| {
+                            let on = *on;
+                            this.model.update(cx, |m, cx| {
+                                m.config.notifications.set(kind, on);
+                                m.config.save();
+                                cx.notify();
+                            });
+                        })),
+                )
+        };
+        let heading = |t: &'static str| {
+            div()
+                .text_xs()
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(muted)
+                .child(t)
+        };
+        v_flex()
+            .gap_4()
+            .child(heading("HEADSET"))
+            .child(row(Kind::Connection, "Connected / disconnected", "Headset turned on or off, docked, or switched to Bluetooth.", cx))
+            .child(row(Kind::Battery, "Low battery", "At the low and critical thresholds in config.toml.", cx))
+            .child(heading("CHANGES MADE ON THE HEADSET"))
+            .child(div().text_xs().text_color(muted).child(
+                "Only for changes made with the headset's own controls; changes made in Ajuste aren't announced.",
+            ))
+            .child(row(Kind::Mute, "Microphone mute", "Mute button or flipping the boom up/down.", cx))
+            .child(row(Kind::Enc, "Noise cancellation", "Holding the mute button.", cx))
+            .child(row(Kind::EqSlot, "EQ slot", "EQ button; names the slot's preset when known.", cx))
+            .child(row(Kind::Lights, "Lights", "Lights button.", cx))
+            .child(row(Kind::Boom, "Boom mic", "Boom mic plugged in or removed.", cx))
     }
 
     fn render_device(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -337,7 +407,8 @@ impl Render for MainView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let body: AnyElement = match self.tab {
             0 => self.render_device(cx).into_any_element(),
-            _ => self.headset_eq.clone().into_any_element(),
+            1 => self.headset_eq.clone().into_any_element(),
+            _ => self.render_notifications(cx).into_any_element(),
         };
         v_flex()
             .size_full()
@@ -351,6 +422,7 @@ impl Render for MainView {
                         .selected_index(self.tab)
                         .child(Tab::new().label("Device"))
                         .child(Tab::new().label("EQ"))
+                        .child(Tab::new().label("Notifications"))
                         .on_click(cx.listener(|this, i: &usize, _, cx| {
                             this.tab = *i;
                             cx.notify();
