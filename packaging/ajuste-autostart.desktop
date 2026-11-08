@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=ajuste
+Comment=Fractal Scape headset tray icon and battery alerts
+Exec=ajuste --hidden
+Icon=audio-headphones
+Terminal=false
+NoDisplay=true
+X-GNOME-Autostart-enabled=true

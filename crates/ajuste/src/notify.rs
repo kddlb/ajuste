@@ -35,7 +35,9 @@ impl BatteryAlerts {
 pub fn show(summary: String, urgent: bool) {
     std::thread::spawn(move || {
         let mut n = notify_rust::Notification::new();
-        n.appname("ajuste").summary(&summary).icon("audio-headset");
+        n.appname("ajuste")
+            .summary(&summary)
+            .icon("audio-headphones");
         if urgent {
             n.urgency(notify_rust::Urgency::Critical);
         }

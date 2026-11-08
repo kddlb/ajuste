@@ -12,16 +12,32 @@ Chrome-only (WebHID) Adjust Pro web app.
 
 Protocol notes: [`FINDINGS.md`](FINDINGS.md).
 
-## Setup
+## Install
+
+**Arch Linux** (AUR):
 
 ```sh
-sudo cp packaging/70-fractal-scape.rules /etc/udev/rules.d/
-sudo udevadm control --reload && sudo udevadm trigger   # or replug the dongle
-cargo build --release
+yay -S ajuste-git        # or: paru -S ajuste-git
 ```
 
-Autostart in the tray: copy `packaging/ajuste.desktop` to `~/.config/autostart/`
-(and put the `ajuste` binary on `PATH`).
+**Other distributions** (from source; needs Rust/cargo):
+
+```sh
+make
+sudo make install        # PREFIX=/usr/local by default; the udev rule goes to /etc/udev/rules.d
+```
+
+Either way, replug the dongle once so the udev rule takes effect. It gives the logged-in user
+access to the headset; no root is needed afterwards.
+
+**Start in the tray at login:**
+
+```sh
+cp /usr/share/ajuste/ajuste-autostart.desktop ~/.config/autostart/   # /usr/local/share/… for source installs
+```
+
+The tray icon needs a StatusNotifierItem host. KDE has one built in; on GNOME install the
+"AppIndicator and KStatusNotifierItem Support" extension.
 
 ## CLI
 
@@ -58,6 +74,10 @@ q = 0.975
 `ajuste [--hidden] [--fake-battery PCT]`. Closing the window keeps the tray icon; quit
 from the tray menu. Settings and saved presets: `~/.config/ajuste/config.toml`
 (`low_battery`, `critical_battery`, `start_hidden`, `presets`).
+
+## License
+
+MIT OR Apache-2.0, at your option.
 
 ## Safety
 

@@ -55,10 +55,10 @@ impl ksni::Tray for ScapeTray {
 
     fn icon_name(&self) -> String {
         match self.state.battery {
-            _ if !self.state.headset => "audio-headset".into(),
+            _ if !self.state.headset => "audio-headphones".into(),
             Some(b) if b <= 10 => "battery-caution".into(),
             Some(b) if b <= 20 => "battery-low".into(),
-            _ => "audio-headset".into(),
+            _ => "audio-headphones".into(),
         }
     }
 
@@ -86,7 +86,7 @@ impl ksni::Tray for ScapeTray {
             MenuItem::Separator,
             StandardItem {
                 label: "Open ajuste".into(),
-                icon_name: "audio-headset".into(),
+                icon_name: "audio-headphones".into(),
                 activate: Box::new(|t: &mut Self| t.send(AppMsg::OpenWindow)),
                 ..Default::default()
             }
