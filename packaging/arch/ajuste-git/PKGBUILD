@@ -13,6 +13,8 @@ optdepends=('libglvnd: EGL fallback when Vulkan is unavailable')
 provides=("$_pkgname")
 conflicts=("$_pkgname")
 install=ajuste.install
+# GCC LTO turns the C shims some crates build (wayland-backend) into IR rust-lld cannot link.
+options=(!lto)
 source=("$_pkgname::git+https://github.com/kddlb/ajuste.git")
 sha256sums=('SKIP')
 
