@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=ajuste
+GenericName=Headset Settings
+Comment=Battery, EQ, sidetone and noise cancellation for the Fractal Scape headset
+Exec=ajuste --hidden
+Icon=audio-headset
+Categories=AudioVideo;Audio;Settings;HardwareSettings;
+StartupWMClass=ajuste
+X-GNOME-Autostart-enabled=true

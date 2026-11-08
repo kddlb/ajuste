@@ -1,0 +1,13 @@
+[package]
+name = "scape-hid"
+description = "hidraw transport and background worker for the Fractal Scape"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+scape-proto.workspace = true
+thiserror.workspace = true
+log.workspace = true
+hidapi = { version = "2.6", default-features = false, features = ["linux-native-basic-udev"] }
+async-channel = "2.5"

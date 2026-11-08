@@ -1,0 +1,3 @@
+/target
+# Fractal Adjust Pro web-app bundle and extracts: third-party code, kept locally only.
+/reference/*.js
