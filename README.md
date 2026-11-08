@@ -31,6 +31,7 @@ ajustectl info                     # firmware / serial / BT address
 ajustectl watch
 ajustectl enc on|off
 ajustectl lights on|off             # LEDs off/on (keeps the stored effect)
+ajustectl lights-show                # decode the stored effect (e.g. "Sunset")
 ajustectl sidetone on --level 40   # 10 % steps
 ajustectl eq presets
 ajustectl eq show [1-3]

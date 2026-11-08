@@ -227,6 +227,7 @@ Tests used slot 3. Slot 1 holds the user's own custom EQ (`Sv7n2oVHjUk6av7JenMs0
 | Plug boom back in | b3 → 1; no auto-mute |
 | Put in charging dock | The headset leaves the radio link; the dongle's `11 21` byte 3 → 0. No state is readable while docked. |
 | `A4 04 0\|1` lights off/on | ✅ Off goes dark, and on brings back the same stored effect. If the stored effect is "RGB Off", "on" stays dark (b6 still reads 1). |
+| `A4 05 <slot> 00 00` read effect | ✅ Read-only. Reply: `A4 05 00 <len> A5 5A <frames> FF <fps> <secs>`, then 42 bytes of metadata `[preset, mode, speed, rgb…, brightness]`, then frames. The user's "Sunset" decodes exactly: preset 2 = SHIFT_SUNSET, mode 0 = shift, speed 75, the 6 palette colours, brightness 100, 78 frames @ 20 fps, 4 s. |
 | Lighting button | b6 toggles 1 ↔ 0 (slot 0 = lights off, matching Adjust Pro's `turnLight` = select slot 0/1) |
 | EQ button | b5 cycles 1 → 2 → 3 → 1; **b25 mirrors b5** (so b25 is not part of the voltage field) |
 | Switch to Bluetooth mode | Same as docking: the headset leaves the dongle (`11 21` byte 3 → 0). It reconnects ~14 s after switching back. So b12 "BT mode" can't be observed through the dongle. |

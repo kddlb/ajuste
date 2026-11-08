@@ -91,6 +91,7 @@ impl MainView {
         let live = h.is_some();
         let enc = h.is_some_and(|h| h.enc_on);
         let lights = h.is_some_and(|h| h.lighting_slot != 0);
+        let effect = m.effect.clone();
         let st_on = h.is_some_and(|h| h.sidetone_on);
         let muted = cx.theme().muted_foreground;
         let section = |title: &'static str, desc: &'static str| {
@@ -121,7 +122,26 @@ impl MainView {
             .child(
                 h_flex()
                     .gap_4()
-                    .child(section("Lights", "Headset LEDs; the effect itself is kept as stored."))
+                    .child(
+                        v_flex()
+                            .gap_0p5()
+                            .flex_1()
+                            .child(div().font_weight(FontWeight::MEDIUM).child("Lights"))
+                            .child(
+                                h_flex()
+                                    .gap_1()
+                                    .child(div().text_xs().text_color(muted).child(match &effect {
+                                        Some(e) => format!("{} · {}", e.label(), e.mode_name()),
+                                        None => "Headset LEDs (stored effect)".into(),
+                                    }))
+                                    .children(effect.iter().flat_map(|e| e.colors.clone()).map(|[r, g, b]| {
+                                        div()
+                                            .size(px(10.))
+                                            .rounded_full()
+                                            .bg(gpui_kit::rgb(u32::from_be_bytes([0, r, g, b])))
+                                    })),
+                            ),
+                    )
                     .child(
                         Switch::new("lights")
                             .checked(lights)

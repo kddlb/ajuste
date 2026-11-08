@@ -33,6 +33,11 @@ enum Cmd {
     Enc { state: OnOff },
     /// Headset LEDs on (stored effect) or off.
     Lights { state: OnOff },
+    /// Dump stored lighting effect metadata (read-only).
+    LightsShow {
+        #[arg(default_value_t = 1)]
+        slot: u8,
+    },
     /// Sidetone (hear your own mic).
     Sidetone {
         state: OnOff,
@@ -162,6 +167,18 @@ fn main() -> Result<()> {
         Cmd::Lights { state } => {
             dev.set_lights(state.on())?;
             confirm(&dev, |s| (s.lighting_slot != 0) == state.on(), "lights")?;
+        }
+        Cmd::LightsShow { slot } => {
+            let d = dev.read_effect_raw(slot)?;
+            match scape_proto::lighting::Effect::parse(&d) {
+                Some(e) => {
+                    println!("slot {slot}: {} ({}, speed {}, brightness {})", e.label(), e.mode_name(), e.speed, e.brightness);
+                    let cols: Vec<String> = e.colors.iter().map(|c| format!("#{:02X}{:02X}{:02X}", c[0], c[1], c[2])).collect();
+                    println!("  colours: {}", cols.join(" "));
+                    println!("  {} frames @ {} fps, {} s loop", e.frames, e.fps, e.seconds);
+                }
+                None => println!("slot {slot}: no stored effect ({})", hex(&d[..12.min(d.len())])),
+            }
         }
         Cmd::Sidetone { state, level } => {
             dev.set_sidetone(state.on(), level)?;

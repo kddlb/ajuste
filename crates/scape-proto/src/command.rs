@@ -47,6 +47,7 @@ mod cmd {
     pub const COMMIT_MIC_EQ: u8 = 0x12;
     pub const GET_MIC_EQ: u8 = 0x13;
     pub const SELECT_EFFECT_SLOT: u8 = 0x04;
+    pub const READ_EFFECT: u8 = 0x05;
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -62,6 +63,9 @@ pub enum Command {
     /// `A4 04 <0|1>` — lighting slot 0 = LEDs off, 1 = the stored effect (Adjust Pro's
     /// `turnLight`). The only lighting command this crate can encode.
     SetLights(bool),
+    /// `A4 05 <slot> <offHi> <offLo>` — read stored effect data (read-only). Offset 0 returns
+    /// the 42-byte metadata header at reply offset 10.
+    ReadEffect { slot: u8, offset: u16 },
     /// `A7 07 <slot>` — no response.
     SelectEq { slot: u8 },
     /// `A7 04 <slot> <0|1>` (slot 4/5 = factory copies of 2/3).
@@ -89,7 +93,7 @@ impl Command {
         match self {
             Command::GetState(t) | Command::GetInfo(t, _) => t.type_byte(),
             Command::SetEnc(_) | Command::Sidetone { .. } => HEADSET,
-            Command::SetLights(_) => EFFECT,
+            Command::SetLights(_) | Command::ReadEffect { .. } => EFFECT,
             _ => EQ,
         }
     }
@@ -101,6 +105,7 @@ impl Command {
             Command::SetEnc(_) => cmd::ENC_CONTROL,
             Command::Sidetone { .. } => cmd::SIDE_TONE_CONTROL,
             Command::SetLights(_) => cmd::SELECT_EFFECT_SLOT,
+            Command::ReadEffect { .. } => cmd::READ_EFFECT,
             Command::SelectEq { .. } => cmd::SELECT_EQ_MODE,
             Command::GetEq { .. } => cmd::GET_EQ_SETTINGS,
             Command::GetEqCoef { .. } => cmd::GET_EQ_COEF,
@@ -122,7 +127,12 @@ impl Command {
     pub fn is_write(&self) -> bool {
         !matches!(
             self,
-            Command::GetState(_) | Command::GetInfo(..) | Command::GetEq { .. } | Command::GetEqCoef { .. } | Command::GetMicChunk { .. }
+            Command::GetState(_)
+                | Command::GetInfo(..)
+                | Command::GetEq { .. }
+                | Command::GetEqCoef { .. }
+                | Command::GetMicChunk { .. }
+                | Command::ReadEffect { .. }
         )
     }
 
@@ -132,6 +142,10 @@ impl Command {
         match self {
             Command::GetState(_) | Command::GetInfo(..) => {}
             Command::SetEnc(on) | Command::SetLights(on) => p.push(*on as u8),
+            Command::ReadEffect { slot, offset } => {
+                p.push(*slot);
+                p.extend(offset.to_be_bytes());
+            }
             Command::Sidetone { op, amount } => p.extend([*op as u8, *amount]),
             Command::SelectEq { slot } => {
                 eq::check_slot(*slot)?;
@@ -234,6 +248,7 @@ mod tests {
             Command::SetEnc(true),
             Command::SetLights(true),
             Command::SetLights(false),
+            Command::ReadEffect { slot: 1, offset: 0 },
             Command::Sidetone { op: SidetoneOp::Enable, amount: 1 },
             Command::SelectEq { slot: 2 },
             Command::GetEq { slot: 1, metadata: false },
@@ -263,7 +278,7 @@ mod tests {
             assert!(t != 0xB5 && t != 0x15, "firmware type in {c:?}");
             assert!(t != 0xA5, "lighting stream in {c:?}");
             // Only the slot select (on/off) is allowed from the lighting command set.
-            assert!(t != 0xA4 || (cmd == 0x04 && r[3] <= 1), "lighting upload in {c:?}");
+            assert!(t != 0xA4 || (cmd == 0x04 && r[3] <= 1) || cmd == 0x05, "lighting upload in {c:?}");
             if t == DONGLE || t == HEADSET {
                 assert!(![0xF0, 0xF1, 0xF2, 0x15].contains(&cmd), "forbidden factory cmd in {c:?}");
             }

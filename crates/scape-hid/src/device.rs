@@ -121,6 +121,17 @@ impl Scape {
         self.send(&Command::SetLights(on)).map(drop)
     }
 
+    /// Raw reply to `A4 05 <slot> 00 00` (stored effect metadata at offset 10).
+    pub fn read_effect_raw(&self, slot: u8) -> Result<Vec<u8>> {
+        self.require_headset()?;
+        self.send_reply(&Command::ReadEffect { slot, offset: 0 })
+    }
+
+    /// Decoded effect stored in a lighting slot (read-only).
+    pub fn read_effect(&self, slot: u8) -> Result<Option<scape_proto::lighting::Effect>> {
+        Ok(scape_proto::lighting::Effect::parse(&self.read_effect_raw(slot)?))
+    }
+
     pub fn set_enc(&self, on: bool) -> Result<()> {
         self.require_headset()?;
         self.send(&Command::SetEnc(on)).map(drop)

@@ -9,6 +9,7 @@
 pub mod biquad;
 pub mod command;
 pub mod eq;
+pub mod lighting;
 pub mod mic;
 pub mod sidetone;
 pub mod state;

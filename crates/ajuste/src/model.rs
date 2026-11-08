@@ -3,6 +3,7 @@
 use gpui_kit::*;
 use scape_hid::{DeviceEvent, DeviceKind, Scape, WorkerHandle};
 use scape_proto::HeadsetState;
+use scape_proto::lighting::Effect;
 
 use crate::config::Config;
 use crate::notify::{self, BatteryAlerts};
@@ -22,6 +23,8 @@ pub struct DeviceModel {
     pub worker: WorkerHandle,
     pub config: Config,
     pub last_error: Option<String>,
+    /// Effect stored in lighting slot 1, read once per connection.
+    pub effect: Option<Effect>,
     /// Number of in-flight device jobs (for spinners).
     pub busy: usize,
     tray: Option<TrayHandle>,
@@ -51,6 +54,7 @@ impl DeviceModel {
             worker,
             config,
             last_error: None,
+            effect: None,
             busy: 0,
             tray,
             alerts: BatteryAlerts::default(),
@@ -68,6 +72,7 @@ impl DeviceModel {
 
     fn on_event(&mut self, ev: DeviceEvent, cx: &mut Context<Self>) {
         let was_ready = self.headset().is_some();
+        let old_light = self.headset().map(|h| h.lighting_slot);
         self.link = match ev {
             DeviceEvent::Connected { kind, .. } => Link::HeadsetAway(kind),
             DeviceEvent::Disconnected { reason } => Link::Absent(reason),
@@ -83,6 +88,12 @@ impl DeviceModel {
         };
 
         let ready = self.headset().is_some();
+        let light_changed = ready && was_ready && self.headset().map(|h| h.lighting_slot) != old_light;
+        if (ready && !was_ready) || light_changed {
+            self.run(cx, |d| d.read_effect(1), |m, e, _| m.effect = e);
+        } else if !ready {
+            self.effect = None;
+        }
         if ready != was_ready && !matches!(self.link, Link::Absent(_)) {
             notify::show(if ready { "Headset connected".into() } else { "Headset disconnected".into() }, false);
         }
