@@ -35,7 +35,10 @@ pub struct Scape {
 
 impl Scape {
     pub fn open() -> Result<Self> {
-        Ok(Scape { t: Transport::open()?, timeout: DEFAULT_TIMEOUT })
+        Ok(Scape {
+            t: Transport::open()?,
+            timeout: DEFAULT_TIMEOUT,
+        })
     }
 
     pub fn kind(&self) -> DeviceKind {
@@ -68,23 +71,33 @@ impl Scape {
     pub fn headset_connected(&self) -> Result<bool> {
         match self.t.kind {
             DeviceKind::WiredHeadset => Ok(true),
-            DeviceKind::Dongle => {
-                Ok(DongleState::parse(&self.send_reply(&Command::GetState(Target::Dongle))?)?.headset_connected)
-            }
+            DeviceKind::Dongle => Ok(DongleState::parse(
+                &self.send_reply(&Command::GetState(Target::Dongle))?,
+            )?
+            .headset_connected),
         }
     }
 
     fn require_headset(&self) -> Result<()> {
-        if self.headset_connected()? { Ok(()) } else { Err(Error::HeadsetAway) }
+        if self.headset_connected()? {
+            Ok(())
+        } else {
+            Err(Error::HeadsetAway)
+        }
     }
 
     pub fn status(&self) -> Result<Status> {
         let headset = if self.headset_connected()? {
-            Some(HeadsetState::parse(&self.send_reply(&Command::GetState(Target::Headset))?)?)
+            Some(HeadsetState::parse(
+                &self.send_reply(&Command::GetState(Target::Headset))?,
+            )?)
         } else {
             None
         };
-        Ok(Status { kind: self.t.kind, headset })
+        Ok(Status {
+            kind: self.t.kind,
+            headset,
+        })
     }
 
     /// Raw `F1 21` payload, for `--hex` debugging.
@@ -95,10 +108,16 @@ impl Scape {
 
     pub fn info(&self, target: Target) -> Result<Info> {
         let get = |f| self.send_reply(&Command::GetInfo(target, f));
-        let msb = get(InfoField::SerialMsb).and_then(|d| Ok(state::parse_serial_half(&d)?)).ok();
-        let lsb = get(InfoField::SerialLsb).and_then(|d| Ok(state::parse_serial_half(&d)?)).ok();
+        let msb = get(InfoField::SerialMsb)
+            .and_then(|d| Ok(state::parse_serial_half(&d)?))
+            .ok();
+        let lsb = get(InfoField::SerialLsb)
+            .and_then(|d| Ok(state::parse_serial_half(&d)?))
+            .ok();
         let info = Info {
-            fw_version: get(InfoField::FwVersion).and_then(|d| Ok(state::parse_fw_version(&d)?)).ok(),
+            fw_version: get(InfoField::FwVersion)
+                .and_then(|d| Ok(state::parse_fw_version(&d)?))
+                .ok(),
             // On hardware the dongle returns the full serial for both halves and the headset
             // leaves the second one empty, so only append it when it adds something.
             serial: match (msb.filter(|s| !s.is_empty()), lsb.filter(|s| !s.is_empty())) {
@@ -106,9 +125,13 @@ impl Scape {
                 (Some(a), _) | (None, Some(a)) => Some(a),
                 (None, None) => None,
             },
-            edition_id: get(InfoField::EditionId).and_then(|d| Ok(state::parse_edition(&d)?)).ok(),
+            edition_id: get(InfoField::EditionId)
+                .and_then(|d| Ok(state::parse_edition(&d)?))
+                .ok(),
             bt_addr: if target == Target::Headset {
-                get(InfoField::BtAddr).and_then(|d| Ok(state::parse_bt_addr(&d)?)).ok()
+                get(InfoField::BtAddr)
+                    .and_then(|d| Ok(state::parse_bt_addr(&d)?))
+                    .ok()
             } else {
                 None
             },
@@ -129,7 +152,9 @@ impl Scape {
 
     /// Decoded effect stored in a lighting slot (read-only).
     pub fn read_effect(&self, slot: u8) -> Result<Option<scape_proto::lighting::Effect>> {
-        Ok(scape_proto::lighting::Effect::parse(&self.read_effect_raw(slot)?))
+        Ok(scape_proto::lighting::Effect::parse(
+            &self.read_effect_raw(slot)?,
+        ))
     }
 
     pub fn set_enc(&self, on: bool) -> Result<()> {
@@ -142,12 +167,20 @@ impl Scape {
         self.require_headset()?;
         let st = HeadsetState::parse(&self.send_reply(&Command::GetState(Target::Headset))?)?;
         if !on {
-            return self.send(&Command::Sidetone { op: SidetoneOp::Disable, amount: 0 }).map(drop);
+            return self
+                .send(&Command::Sidetone {
+                    op: SidetoneOp::Disable,
+                    amount: 0,
+                })
+                .map(drop);
         }
         let mut raw = st.sidetone_raw;
         if !st.sidetone_on {
             // Response is `F1 34 00 <state> <vol>`.
-            let r = self.send_reply(&Command::Sidetone { op: SidetoneOp::Enable, amount: 1 })?; // app sends `F1 34 01 01`
+            let r = self.send_reply(&Command::Sidetone {
+                op: SidetoneOp::Enable,
+                amount: 1,
+            })?; // app sends `F1 34 01 01`
             raw = r.get(4).copied().unwrap_or(raw);
         }
         if let Some(pct) = level_pct {
@@ -166,24 +199,44 @@ impl Scape {
         eq::check_slot(slot)?;
         self.require_headset()?;
         let mut src = slot;
-        let mut data = self.send_reply(&Command::GetEq { slot, metadata: false })?;
+        let mut data = self.send_reply(&Command::GetEq {
+            slot,
+            metadata: false,
+        })?;
         let mut factory_copy = false;
         // Same fallback as Adjust Pro: empty user slot 2/3 → read factory copy 4/5.
         if (slot == 2 || slot == 3) && data.get(3) == Some(&0) {
             src = slot + 2;
-            data = self.send_reply(&Command::GetEq { slot: src, metadata: false })?;
+            data = self.send_reply(&Command::GetEq {
+                slot: src,
+                metadata: false,
+            })?;
             factory_copy = true;
         }
         let (_, _, profile) = EqProfile::parse_settings(&data)?;
         let preset_uid = self
-            .send_reply(&Command::GetEq { slot: src, metadata: true })
+            .send_reply(&Command::GetEq {
+                slot: src,
+                metadata: true,
+            })
             .ok()
             .and_then(|d| EqProfile::parse_metadata(&d).ok())
             .filter(|s| !s.is_empty());
-        Ok(EqSlot { slot, profile, preset_uid, factory_copy })
+        Ok(EqSlot {
+            slot,
+            profile,
+            preset_uid,
+            factory_copy,
+        })
     }
 
-    pub fn apply_eq(&self, slot: u8, profile: &EqProfile, mode: CommitMode, preset_uid: &str) -> Result<()> {
+    pub fn apply_eq(
+        &self,
+        slot: u8,
+        profile: &EqProfile,
+        mode: CommitMode,
+        preset_uid: &str,
+    ) -> Result<()> {
         let cmds = profile.apply_commands(slot, mode, preset_uid)?;
         self.require_headset()?;
         self.run(&cmds)

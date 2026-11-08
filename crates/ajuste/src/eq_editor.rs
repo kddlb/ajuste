@@ -60,8 +60,15 @@ impl EqEditor {
         match kind {
             EditorKind::Headset => this.load_slot(1, false, cx),
             EditorKind::Mic => {
-                this.status = Some("The stored mic EQ can't be read back as bands; starting flat.".into());
-                this.set_profile(EqProfile { points: MIC_PRESETS[0].points.to_vec() }, None, cx);
+                this.status =
+                    Some("The stored mic EQ can't be read back as bands; starting flat.".into());
+                this.set_profile(
+                    EqProfile {
+                        points: MIC_PRESETS[0].points.to_vec(),
+                    },
+                    None,
+                    cx,
+                );
             }
         }
         this
@@ -101,7 +108,8 @@ impl EqEditor {
                 match r {
                     Ok(s) => {
                         if s.factory_copy {
-                            this.status = Some("Slot is empty; showing the factory default.".into());
+                            this.status =
+                                Some("Slot is empty; showing the factory default.".into());
                         }
                         this.set_profile(s.profile, s.preset_uid, cx);
                     }
@@ -133,31 +141,46 @@ impl EqEditor {
             .enumerate()
             .map(|(i, p)| {
                 let mk = |min: f32, max: f32, step: f32, scale, v: f32, cx: &mut Context<Self>| {
-                    cx.new(|_| SliderState::new().min(min).max(max).step(step).scale(scale).default_value(v))
+                    cx.new(|_| {
+                        SliderState::new()
+                            .min(min)
+                            .max(max)
+                            .step(step)
+                            .scale(scale)
+                            .default_value(v)
+                    })
                 };
                 let (gmin, gmax) = match self.kind {
                     EditorKind::Headset => eq::GAIN_RANGE,
                     EditorKind::Mic => (-12.0, 12.0),
                 };
                 let band = Band {
-                    freq: mk(20.0, 20_000.0, 1.0, SliderScale::Logarithmic, p.freq as f32, cx),
+                    freq: mk(
+                        20.0,
+                        20_000.0,
+                        1.0,
+                        SliderScale::Logarithmic,
+                        p.freq as f32,
+                        cx,
+                    ),
                     gain: mk(gmin, gmax, 0.1, SliderScale::Linear, p.gain, cx),
                     q: mk(0.5, 10.0, 0.01, SliderScale::Logarithmic, p.q, cx),
                 };
                 for (which, s) in [(0, &band.freq), (1, &band.gain), (2, &band.q)] {
-                    self._subs.push(cx.subscribe(s, move |this, _, ev: &SliderEvent, cx| {
-                        let (SliderEvent::Change(v) | SliderEvent::Release(v)) = ev;
-                        let v = v.start();
-                        if let Some(pt) = this.profile.points.get_mut(i) {
-                            match which {
-                                0 => pt.freq = v.round() as u16,
-                                1 => pt.gain = (v * 10.0).round() / 10.0,
-                                _ => pt.q = (v * 100.0).round() / 100.0,
+                    self._subs
+                        .push(cx.subscribe(s, move |this, _, ev: &SliderEvent, cx| {
+                            let (SliderEvent::Change(v) | SliderEvent::Release(v)) = ev;
+                            let v = v.start();
+                            if let Some(pt) = this.profile.points.get_mut(i) {
+                                match which {
+                                    0 => pt.freq = v.round() as u16,
+                                    1 => pt.gain = (v * 10.0).round() / 10.0,
+                                    _ => pt.q = (v * 100.0).round() / 100.0,
+                                }
+                                *pt = pt.clamped();
                             }
-                            *pt = pt.clamped();
-                        }
-                        this.edited(cx);
-                    }));
+                            this.edited(cx);
+                        }));
                 }
                 band
             })
@@ -201,7 +224,10 @@ impl EqEditor {
         let worker = self.worker(cx);
         let profile = self.profile.clone();
         let (kind, slot) = (self.kind, self.slot);
-        let uid = self.preset_uid.clone().unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        let uid = self
+            .preset_uid
+            .clone()
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
         self.preset_uid = Some(uid.clone());
         self.status = Some("Saving…".into());
         cx.spawn(async move |this, cx| {
@@ -254,7 +280,9 @@ impl EqEditor {
         if self.profile.points.len() >= eq::MAX_POINTS {
             return;
         }
-        self.profile.points.push(EqPoint::new(FilterType::Peak, 1000, 0.0, 1.0));
+        self.profile
+            .points
+            .push(EqPoint::new(FilterType::Peak, 1000, 0.0, 1.0));
         self.rebuild_bands(cx);
         self.edited(cx);
     }
@@ -296,7 +324,9 @@ impl EqEditor {
                     );
                 }
                 for p in self.model.read(cx).config.presets.clone() {
-                    let profile = EqProfile { points: p.points.clone() };
+                    let profile = EqProfile {
+                        points: p.points.clone(),
+                    };
                     let selected = current.as_deref() == Some(p.uid.as_str());
                     row = row.child(
                         Button::new(SharedString::from(format!("user-{}", p.uid)))
@@ -314,7 +344,9 @@ impl EqEditor {
             }
             EditorKind::Mic => {
                 for p in MIC_PRESETS {
-                    let profile = EqProfile { points: p.points.to_vec() };
+                    let profile = EqProfile {
+                        points: p.points.to_vec(),
+                    };
                     row = row.child(
                         Button::new(SharedString::from(format!("mic-{}", p.name)))
                             .label(p.name)
@@ -334,7 +366,12 @@ impl EqEditor {
         let muted = cx.theme().muted_foreground;
         let types: &[FilterType] = match self.kind {
             EditorKind::Headset => &FilterType::EDITOR,
-            EditorKind::Mic => &[FilterType::Peak, FilterType::LowShelf, FilterType::HighShelf, FilterType::LowPass],
+            EditorKind::Mic => &[
+                FilterType::Peak,
+                FilterType::LowShelf,
+                FilterType::HighShelf,
+                FilterType::LowPass,
+            ],
         };
         let mut type_row = h_flex().gap_1();
         for &t in types {
@@ -362,7 +399,17 @@ impl EqEditor {
             .child(
                 h_flex()
                     .justify_between()
-                    .child(h_flex().gap_2().child(div().text_sm().font_weight(FontWeight::SEMIBOLD).child(format!("Band {}", i + 1))).child(type_row))
+                    .child(
+                        h_flex()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .child(format!("Band {}", i + 1)),
+                            )
+                            .child(type_row),
+                    )
                     .child(
                         Button::new(SharedString::from(format!("band-{i}-remove")))
                             .label("Remove")
@@ -392,28 +439,39 @@ impl Render for EqEditor {
                             .segmented()
                             .selected_index(self.slot as usize - 1)
                             .children((1..=eq::SLOTS).map(|s| {
-                                Tab::new().label(if active == Some(s) { format!("Slot {s} ●") } else { format!("Slot {s}") })
+                                Tab::new().label(if active == Some(s) {
+                                    format!("Slot {s} ●")
+                                } else {
+                                    format!("Slot {s}")
+                                })
                             }))
-                            .on_click(cx.listener(|this, i: &usize, _, cx| this.load_slot(*i as u8 + 1, false, cx))),
+                            .on_click(cx.listener(|this, i: &usize, _, cx| {
+                                this.load_slot(*i as u8 + 1, false, cx)
+                            })),
                     )
-                    .child(div().text_xs().text_color(cx.theme().muted_foreground).child("● = active on headset")),
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("● = active on headset"),
+                    ),
             );
         }
 
-        root = root
-            .child(self.render_presets(cx))
-            .child(
-                div()
-                    .rounded_md()
-                    .bg(cx.theme().secondary)
-                    .p_2()
-                    .child(response_curve(self.profile.points.clone(), cx)),
-            );
+        root = root.child(self.render_presets(cx)).child(
+            div()
+                .rounded_md()
+                .bg(cx.theme().secondary)
+                .p_2()
+                .child(response_curve(self.profile.points.clone(), cx)),
+        );
 
-        let bands: Vec<_> = (0..self.bands.len()).map(|i| {
-            let band = &self.bands[i];
-            self.render_band(i, band, cx).into_any_element()
-        }).collect();
+        let bands: Vec<_> = (0..self.bands.len())
+            .map(|i| {
+                let band = &self.bands[i];
+                self.render_band(i, band, cx).into_any_element()
+            })
+            .collect();
         root = root.children(bands);
 
         let can_add = self.profile.points.len() < eq::MAX_POINTS;
@@ -431,7 +489,11 @@ impl Render for EqEditor {
                 Button::new("save")
                     .primary()
                     .small()
-                    .label(if self.kind == EditorKind::Headset { format!("Save to slot {}", self.slot) } else { "Save mic EQ".into() })
+                    .label(if self.kind == EditorKind::Headset {
+                        format!("Save to slot {}", self.slot)
+                    } else {
+                        "Save mic EQ".into()
+                    })
                     .disabled(!connected || self.loading)
                     .on_click(cx.listener(|this, _, _, cx| this.save(cx))),
             );
@@ -474,7 +536,12 @@ impl Render for EqEditor {
             _ => None,
         };
         for line in [self.status.clone(), hint].into_iter().flatten() {
-            root = root.child(div().text_xs().text_color(cx.theme().muted_foreground).child(line));
+            root = root.child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(line),
+            );
         }
         root
     }

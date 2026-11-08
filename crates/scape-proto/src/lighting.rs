@@ -33,7 +33,10 @@ impl Effect {
         let mode = m[1];
         // Layout per Adjust Pro's effect classes: `[preset, mode, speed, colours…, extras…, brightness]`.
         let n = color_count(mode);
-        let colors: Vec<[u8; 3]> = m[3..3 + 3 * n].chunks(3).map(|c| [c[0], c[1], c[2]]).collect();
+        let colors: Vec<[u8; 3]> = m[3..3 + 3 * n]
+            .chunks(3)
+            .map(|c| [c[0], c[1], c[2]])
+            .collect();
         let extras = match mode {
             8 => 1, // two-colour fade repeats the speed
             9 => 4, // radius: up/top/down wave + freq
@@ -62,24 +65,36 @@ impl Effect {
 
     /// e.g. "Sunset", falling back to the mode name for custom effects.
     pub fn label(&self) -> String {
-        self.preset_name().map(str::to_string).unwrap_or_else(|| format!("Custom {}", self.mode_name()))
+        self.preset_name()
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("Custom {}", self.mode_name()))
     }
 }
 
 /// Colours stored per mode (Adjust Pro `colorNumControl`).
 pub fn color_count(mode: u8) -> usize {
     match mode {
-        0 | 6 | 11 => 6,     // shift, lava lamp, torrent
-        2 | 7 | 8 => 2,      // breathe, wave ripple, two-colour fade
+        0 | 6 | 11 => 6,        // shift, lava lamp, torrent
+        2 | 7 | 8 => 2,         // breathe, wave ripple, two-colour fade
         1 | 3 | 4 | 5 | 9 => 1, // still, meshify, fade in, instant, radius
-        _ => 0,              // off / unknown
+        _ => 0,                 // off / unknown
     }
 }
 
 /// Animation modes (Adjust Pro `tn`).
 pub const MODES: [&str; 12] = [
-    "shift", "still", "breathe", "meshify", "fade in", "instant", "lava lamp", "wave ripple",
-    "two-colour fade", "radius", "off", "torrent",
+    "shift",
+    "still",
+    "breathe",
+    "meshify",
+    "fade in",
+    "instant",
+    "lava lamp",
+    "wave ripple",
+    "two-colour fade",
+    "radius",
+    "off",
+    "torrent",
 ];
 
 /// Built-in preset IDs (Adjust Pro `$n`) → display name.
@@ -125,10 +140,11 @@ mod tests {
 
     /// Real reply captured from the user's headset (Sunset).
     const SUNSET: [u8; 63] = [
-        0xa4, 0x05, 0x00, 0x3b, 0xa5, 0x5a, 0x4e, 0xff, 0x14, 0x04, 0x02, 0x00, 0x4b, 0xc6, 0x00, 0x00, 0xc6, 0x00,
-        0x00, 0xe5, 0x5f, 0x00, 0xe5, 0x5f, 0x00, 0xc1, 0x00, 0x16, 0xf4, 0x00, 0xa3, 0x64, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xc6, 0x00,
-        0x00, 0xc6, 0x00, 0x00, 0xc6, 0x00, 0x00, 0xd6, 0x30,
+        0xa4, 0x05, 0x00, 0x3b, 0xa5, 0x5a, 0x4e, 0xff, 0x14, 0x04, 0x02, 0x00, 0x4b, 0xc6, 0x00,
+        0x00, 0xc6, 0x00, 0x00, 0xe5, 0x5f, 0x00, 0xe5, 0x5f, 0x00, 0xc1, 0x00, 0x16, 0xf4, 0x00,
+        0xa3, 0x64, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xc6, 0x00, 0x00, 0xc6, 0x00, 0x00, 0xc6, 0x00,
+        0x00, 0xd6, 0x30,
     ];
 
     #[test]
@@ -136,17 +152,27 @@ mod tests {
         let e = Effect::parse(&SUNSET).unwrap();
         assert_eq!(e.label(), "Sunset");
         assert_eq!(e.mode_name(), "shift");
-        assert_eq!((e.frames, e.fps, e.seconds, e.speed, e.brightness), (78, 20, 4, 75, 100));
+        assert_eq!(
+            (e.frames, e.fps, e.seconds, e.speed, e.brightness),
+            (78, 20, 4, 75, 100)
+        );
         assert_eq!(
             e.colors,
-            vec![[0xc6, 0, 0], [0xc6, 0, 0], [0xe5, 0x5f, 0], [0xe5, 0x5f, 0], [0xc1, 0, 0x16], [0xf4, 0, 0xa3]]
+            vec![
+                [0xc6, 0, 0],
+                [0xc6, 0, 0],
+                [0xe5, 0x5f, 0],
+                [0xe5, 0x5f, 0],
+                [0xc1, 0, 0x16],
+                [0xf4, 0, 0xa3]
+            ]
         );
     }
 
     /// Real reply: "Pink sapphire" two-colour fade (#FF0059 / #000000).
     const PINK_SAPPHIRE: [u8; 31] = [
-        0xa4, 0x05, 0x00, 0x3b, 0xa5, 0x5a, 0x50, 0xff, 0x14, 0x04, 0x0e, 0x08, 0x4b, 0xff, 0x00, 0x59, 0x00, 0x00,
-        0x00, 0x4b, 0x64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0xa4, 0x05, 0x00, 0x3b, 0xa5, 0x5a, 0x50, 0xff, 0x14, 0x04, 0x0e, 0x08, 0x4b, 0xff, 0x00,
+        0x59, 0x00, 0x00, 0x00, 0x4b, 0x64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     ];
 
     #[test]

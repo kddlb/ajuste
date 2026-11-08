@@ -27,7 +27,12 @@ pub struct UserPreset {
 
 impl Default for Config {
     fn default() -> Self {
-        Config { low_battery: 20, critical_battery: 10, start_hidden: false, presets: Vec::new() }
+        Config {
+            low_battery: 20,
+            critical_battery: 10,
+            start_hidden: false,
+            presets: Vec::new(),
+        }
     }
 }
 
@@ -37,7 +42,9 @@ fn path() -> Option<PathBuf> {
 
 impl Config {
     pub fn load() -> Config {
-        let Some(p) = path() else { return Config::default() };
+        let Some(p) = path() else {
+            return Config::default();
+        };
         match std::fs::read_to_string(&p) {
             Ok(s) => toml::from_str(&s).unwrap_or_else(|e| {
                 log::warn!("ignoring invalid {}: {e}", p.display());

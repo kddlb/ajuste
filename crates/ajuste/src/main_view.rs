@@ -21,7 +21,13 @@ pub struct MainView {
 
 impl MainView {
     pub fn new(model: Entity<DeviceModel>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let sidetone = cx.new(|_| SliderState::new().min(0.0).max(100.0).step(10.0).default_value(0.0));
+        let sidetone = cx.new(|_| {
+            SliderState::new()
+                .min(0.0)
+                .max(100.0)
+                .step(10.0)
+                .default_value(0.0)
+        });
         let headset_eq = cx.new(|cx| EqEditor::new(model.clone(), EditorKind::Headset, cx));
         let mic_eq = cx.new(|cx| EqEditor::new(model.clone(), EditorKind::Mic, cx));
 
@@ -31,7 +37,8 @@ impl MainView {
                 if let Some(h) = model.read(cx).headset() {
                     let pct = h.sidetone_pct() as f32;
                     if this.sidetone.read(cx).value().start() != pct {
-                        this.sidetone.update(cx, |s, cx| s.set_value(pct, window, cx));
+                        this.sidetone
+                            .update(cx, |s, cx| s.set_value(pct, window, cx));
                     }
                 }
                 cx.notify();
@@ -39,11 +46,19 @@ impl MainView {
             cx.subscribe(&sidetone, |this, _, ev: &SliderEvent, cx| {
                 if let SliderEvent::Release(v) = ev {
                     let pct = v.start().round() as u8;
-                    this.model.update(cx, |m, cx| m.set_sidetone(true, Some(pct), cx));
+                    this.model
+                        .update(cx, |m, cx| m.set_sidetone(true, Some(pct), cx));
                 }
             }),
         ];
-        MainView { model, tab: 0, sidetone, headset_eq, mic_eq, _subs: subs }
+        MainView {
+            model,
+            tab: 0,
+            sidetone,
+            headset_eq,
+            mic_eq,
+            _subs: subs,
+        }
     }
 
     fn render_header(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -51,13 +66,20 @@ impl MainView {
         let theme = cx.theme();
         let (title, subtitle) = match &m.link {
             Link::Absent(reason) => ("Not connected".to_string(), reason.clone()),
-            Link::HeadsetAway(kind) => ("Headset off or out of range".into(), format!("{kind:?} found")),
+            Link::HeadsetAway(kind) => (
+                "Headset off or out of range".into(),
+                format!("{kind:?} found"),
+            ),
             Link::Ready(kind, h) => (
                 format!("Battery {}%", h.battery_pct),
                 format!(
                     "{:?} · mic {}{} · EQ slot {}",
                     kind,
-                    if h.boom_mic_attached { "boom" } else { "built-in" },
+                    if h.boom_mic_attached {
+                        "boom"
+                    } else {
+                        "built-in"
+                    },
                     if h.muted { " (muted)" } else { "" },
                     h.eq_slot
                 ),
@@ -74,8 +96,18 @@ impl MainView {
             .p_4()
             .border_b_1()
             .border_color(theme.border)
-            .child(div().text_lg().font_weight(FontWeight::SEMIBOLD).child(title))
-            .child(div().text_sm().text_color(theme.muted_foreground).child(subtitle));
+            .child(
+                div()
+                    .text_lg()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child(title),
+            )
+            .child(
+                div()
+                    .text_sm()
+                    .text_color(theme.muted_foreground)
+                    .child(subtitle),
+            );
         if let Some(b) = battery {
             col = col.child(Progress::new("battery").value(b as f32).color(color));
         }
@@ -108,7 +140,10 @@ impl MainView {
             .child(
                 h_flex()
                     .gap_4()
-                    .child(section("Noise cancellation", "ENC filters background noise from your mic."))
+                    .child(section(
+                        "Noise cancellation",
+                        "ENC filters background noise from your mic.",
+                    ))
                     .child(
                         Switch::new("enc")
                             .checked(enc)
@@ -134,12 +169,14 @@ impl MainView {
                                         Some(e) => format!("{} · {}", e.label(), e.mode_name()),
                                         None => "Headset LEDs (stored effect)".into(),
                                     }))
-                                    .children(effect.iter().flat_map(|e| e.colors.clone()).map(|[r, g, b]| {
-                                        div()
-                                            .size(px(10.))
-                                            .rounded_full()
-                                            .bg(gpui_kit::rgb(u32::from_be_bytes([0, r, g, b])))
-                                    })),
+                                    .children(effect.iter().flat_map(|e| e.colors.clone()).map(
+                                        |[r, g, b]| {
+                                            div()
+                                                .size(px(10.))
+                                                .rounded_full()
+                                                .bg(gpui_kit::rgb(u32::from_be_bytes([0, r, g, b])))
+                                        },
+                                    )),
                             ),
                     )
                     .child(
@@ -158,7 +195,10 @@ impl MainView {
                     .child(
                         h_flex()
                             .gap_4()
-                            .child(section("Sidetone", "Hear your own voice through the headset."))
+                            .child(section(
+                                "Sidetone",
+                                "Hear your own voice through the headset.",
+                            ))
                             .child(
                                 Switch::new("sidetone")
                                     .checked(st_on)
@@ -172,7 +212,11 @@ impl MainView {
                     .child(
                         h_flex()
                             .gap_2()
-                            .child(Slider::new(&self.sidetone).disabled(!live || !st_on).flex_1())
+                            .child(
+                                Slider::new(&self.sidetone)
+                                    .disabled(!live || !st_on)
+                                    .flex_1(),
+                            )
                             .child(
                                 div()
                                     .w(px(44.))
@@ -185,7 +229,10 @@ impl MainView {
             .child(
                 h_flex()
                     .gap_4()
-                    .child(section("Active EQ", "Pick which of the three stored EQ slots plays."))
+                    .child(section(
+                        "Active EQ",
+                        "Pick which of the three stored EQ slots plays.",
+                    ))
                     .child(
                         TabBar::new("active-eq")
                             .segmented()
@@ -226,6 +273,13 @@ impl Render for MainView {
                         })),
                 ),
             )
-            .child(div().id("body").flex_1().overflow_y_scroll().p_4().child(body))
+            .child(
+                div()
+                    .id("body")
+                    .flex_1()
+                    .overflow_y_scroll()
+                    .p_4()
+                    .child(body),
+            )
     }
 }

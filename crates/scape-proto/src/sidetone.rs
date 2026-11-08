@@ -16,7 +16,11 @@ pub enum SidetoneOp {
 const MAX_STEP: u8 = 50;
 
 pub fn raw_to_pct(raw: u8) -> u8 {
-    if raw <= 50 { 0 } else { ((raw - 50) * 2).min(100) }
+    if raw <= 50 {
+        0
+    } else {
+        ((raw - 50) * 2).min(100)
+    }
 }
 
 /// Percent → raw, snapped to the 10 % grid the device supports.
@@ -31,10 +35,17 @@ pub fn plan_volume(current_raw: u8, target_pct: u8) -> Vec<Command> {
     let mut cur = current_raw;
     let mut out = Vec::new();
     if cur == 0 && target > 0 {
-        out.push(Command::Sidetone { op: SidetoneOp::VolUp, amount: MAX_STEP });
+        out.push(Command::Sidetone {
+            op: SidetoneOp::VolUp,
+            amount: MAX_STEP,
+        });
         cur = MAX_STEP;
     }
-    let (op, mut delta) = if target >= cur { (SidetoneOp::VolUp, target - cur) } else { (SidetoneOp::VolDown, cur - target) };
+    let (op, mut delta) = if target >= cur {
+        (SidetoneOp::VolUp, target - cur)
+    } else {
+        (SidetoneOp::VolDown, cur - target)
+    };
     // The app splits amounts ≥ 51 into 50 + remainder.
     while delta > 0 {
         let step = delta.min(MAX_STEP);

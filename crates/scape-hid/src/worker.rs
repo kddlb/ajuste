@@ -83,7 +83,10 @@ fn run(jobs: mpsc::Receiver<Job>, events: async_channel::Sender<DeviceEvent>) {
         if dev.is_none() && Instant::now() >= next_poll {
             match Scape::open() {
                 Ok(d) => {
-                    let _ = events.send_blocking(DeviceEvent::Connected { kind: d.kind(), path: d.path().to_string() });
+                    let _ = events.send_blocking(DeviceEvent::Connected {
+                        kind: d.kind(),
+                        path: d.path().to_string(),
+                    });
                     dev = Some(d);
                     last_err.clear();
                 }
@@ -91,7 +94,9 @@ fn run(jobs: mpsc::Receiver<Job>, events: async_channel::Sender<DeviceEvent>) {
                     let msg = e.to_string();
                     if msg != last_err {
                         log::info!("device unavailable: {msg}");
-                        let _ = events.send_blocking(DeviceEvent::Disconnected { reason: msg.clone() });
+                        let _ = events.send_blocking(DeviceEvent::Disconnected {
+                            reason: msg.clone(),
+                        });
                         last_err = msg;
                     }
                     next_poll = Instant::now() + Duration::from_secs(2);
@@ -123,7 +128,9 @@ fn run(jobs: mpsc::Receiver<Job>, events: async_channel::Sender<DeviceEvent>) {
                 Err(Error::Timeout(_)) => log::debug!("status poll timed out"),
                 Err(e) => {
                     log::warn!("device lost: {e}");
-                    let _ = events.send_blocking(DeviceEvent::Disconnected { reason: e.to_string() });
+                    let _ = events.send_blocking(DeviceEvent::Disconnected {
+                        reason: e.to_string(),
+                    });
                     last_err = e.to_string();
                     dev = None;
                 }

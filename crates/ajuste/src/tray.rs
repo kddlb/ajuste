@@ -63,7 +63,11 @@ impl ksni::Tray for ScapeTray {
     }
 
     fn tool_tip(&self) -> ToolTip {
-        ToolTip { title: "Fractal Scape".into(), description: self.summary(), ..Default::default() }
+        ToolTip {
+            title: "Fractal Scape".into(),
+            description: self.summary(),
+            ..Default::default()
+        }
     }
 
     fn activate(&mut self, _x: i32, _y: i32) {
@@ -108,7 +112,11 @@ impl ksni::Tray for ScapeTray {
                 selected: self.state.eq_slot.saturating_sub(1) as usize,
                 select: Box::new(|t: &mut Self, i| t.send(AppMsg::SelectEq(i as u8 + 1))),
                 options: (1..=3)
-                    .map(|i| RadioItem { label: format!("EQ slot {i}"), enabled: live, ..Default::default() })
+                    .map(|i| RadioItem {
+                        label: format!("EQ slot {i}"),
+                        enabled: live,
+                        ..Default::default()
+                    })
                     .collect(),
             }
             .into(),
@@ -127,7 +135,12 @@ impl ksni::Tray for ScapeTray {
 pub type TrayHandle = ksni::blocking::Handle<ScapeTray>;
 
 pub fn spawn(tx: async_channel::Sender<AppMsg>) -> Option<TrayHandle> {
-    match (ScapeTray { state: TrayState::default(), tx }).spawn() {
+    match (ScapeTray {
+        state: TrayState::default(),
+        tx,
+    })
+    .spawn()
+    {
         Ok(h) => Some(h),
         Err(e) => {
             log::warn!("tray unavailable ({e}); closing the window will quit");

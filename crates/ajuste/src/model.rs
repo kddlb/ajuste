@@ -88,18 +88,29 @@ impl DeviceModel {
         };
 
         let ready = self.headset().is_some();
-        let light_changed = ready && was_ready && self.headset().map(|h| h.lighting_slot) != old_light;
+        let light_changed =
+            ready && was_ready && self.headset().map(|h| h.lighting_slot) != old_light;
         if (ready && !was_ready) || light_changed {
             self.run(cx, |d| d.read_effect(1), |m, e, _| m.effect = e);
         } else if !ready {
             self.effect = None;
         }
         if ready != was_ready && !matches!(self.link, Link::Absent(_)) {
-            notify::show(if ready { "Headset connected".into() } else { "Headset disconnected".into() }, false);
+            notify::show(
+                if ready {
+                    "Headset connected".into()
+                } else {
+                    "Headset disconnected".into()
+                },
+                false,
+            );
         }
         if let Some(h) = self.headset()
-            && let Some((msg, urgent)) =
-                self.alerts.update(h.battery_pct, self.config.low_battery, self.config.critical_battery)
+            && let Some((msg, urgent)) = self.alerts.update(
+                h.battery_pct,
+                self.config.low_battery,
+                self.config.critical_battery,
+            )
         {
             notify::show(msg, urgent);
         }

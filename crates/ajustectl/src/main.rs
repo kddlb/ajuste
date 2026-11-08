@@ -9,7 +9,11 @@ use scape_proto::mic::{self, MIC_PRESETS, MicType};
 use scape_proto::{Command, Target, hex};
 
 #[derive(Parser)]
-#[command(name = "ajustectl", version, about = "Control the Fractal Scape headset over hidraw")]
+#[command(
+    name = "ajustectl",
+    version,
+    about = "Control the Fractal Scape headset over hidraw"
+)]
 struct Cli {
     /// Print every raw report sent/received.
     #[arg(long, global = true)]
@@ -172,12 +176,28 @@ fn main() -> Result<()> {
             let d = dev.read_effect_raw(slot)?;
             match scape_proto::lighting::Effect::parse(&d) {
                 Some(e) => {
-                    println!("slot {slot}: {} ({}, speed {}, brightness {})", e.label(), e.mode_name(), e.speed, e.brightness);
-                    let cols: Vec<String> = e.colors.iter().map(|c| format!("#{:02X}{:02X}{:02X}", c[0], c[1], c[2])).collect();
+                    println!(
+                        "slot {slot}: {} ({}, speed {}, brightness {})",
+                        e.label(),
+                        e.mode_name(),
+                        e.speed,
+                        e.brightness
+                    );
+                    let cols: Vec<String> = e
+                        .colors
+                        .iter()
+                        .map(|c| format!("#{:02X}{:02X}{:02X}", c[0], c[1], c[2]))
+                        .collect();
                     println!("  colours: {}", cols.join(" "));
-                    println!("  {} frames @ {} fps, {} s loop", e.frames, e.fps, e.seconds);
+                    println!(
+                        "  {} frames @ {} fps, {} s loop",
+                        e.frames, e.fps, e.seconds
+                    );
                 }
-                None => println!("slot {slot}: no stored effect ({})", hex(&d[..12.min(d.len())])),
+                None => println!(
+                    "slot {slot}: no stored effect ({})",
+                    hex(&d[..12.min(d.len())])
+                ),
             }
         }
         Cmd::Sidetone { state, level } => {
@@ -191,14 +211,24 @@ fn main() -> Result<()> {
             }
         }
         Cmd::Eq(EqCmd::Show { slot }) => {
-            let slots: Vec<u8> = slot.map(|s| vec![s]).unwrap_or_else(|| (1..=eq::SLOTS).collect());
+            let slots: Vec<u8> = slot
+                .map(|s| vec![s])
+                .unwrap_or_else(|| (1..=eq::SLOTS).collect());
             for s in slots {
                 let e = dev.read_eq(s)?;
-                let name = e.preset_uid.as_deref().and_then(eq::preset_by_uid).map(|p| p.name);
+                let name = e
+                    .preset_uid
+                    .as_deref()
+                    .and_then(eq::preset_by_uid)
+                    .map(|p| p.name);
                 println!(
                     "slot {s}: preset {}{}",
                     name.or(e.preset_uid.as_deref()).unwrap_or("(none)"),
-                    if e.factory_copy { " [factory copy]" } else { "" }
+                    if e.factory_copy {
+                        " [factory copy]"
+                    } else {
+                        ""
+                    }
                 );
                 print_profile(&e.profile);
             }
@@ -208,12 +238,25 @@ fn main() -> Result<()> {
             std::thread::sleep(Duration::from_millis(300));
             confirm(&dev, |s| s.eq_slot == slot, "EQ slot")?;
         }
-        Cmd::Eq(EqCmd::Apply { slot, src, save, uid: u, .. }) => {
+        Cmd::Eq(EqCmd::Apply {
+            slot,
+            src,
+            save,
+            uid: u,
+            ..
+        }) => {
             let (profile, uid) = load_profile(&src)?;
             let uid = u.unwrap_or(uid);
-            let mode = if save { CommitMode::Save } else { CommitMode::Live };
+            let mode = if save {
+                CommitMode::Save
+            } else {
+                CommitMode::Live
+            };
             dev.apply_eq(slot, &profile, mode, &uid)?;
-            println!("applied to slot {slot} ({})", if save { "saved" } else { "live, not persisted" });
+            println!(
+                "applied to slot {slot} ({})",
+                if save { "saved" } else { "live, not persisted" }
+            );
         }
         Cmd::MicEq(MicCmd::Show) => {
             let t = dev.read_mic_table()?;
@@ -236,11 +279,24 @@ fn main() -> Result<()> {
 
 fn dry_run_commands(cmd: &Cmd) -> Result<Option<Vec<Command>>> {
     Ok(match cmd {
-        Cmd::Eq(EqCmd::Select { slot, dry_run: true }) => Some(vec![Command::SelectEq { slot: *slot }]),
-        Cmd::Eq(EqCmd::Apply { slot, src, save, uid: u, dry_run: true }) => {
+        Cmd::Eq(EqCmd::Select {
+            slot,
+            dry_run: true,
+        }) => Some(vec![Command::SelectEq { slot: *slot }]),
+        Cmd::Eq(EqCmd::Apply {
+            slot,
+            src,
+            save,
+            uid: u,
+            dry_run: true,
+        }) => {
             let (p, uid) = load_profile(src)?;
             let uid = u.clone().unwrap_or(uid);
-            let mode = if *save { CommitMode::Save } else { CommitMode::Live };
+            let mode = if *save {
+                CommitMode::Save
+            } else {
+                CommitMode::Live
+            };
             Some(p.apply_commands(*slot, mode, &uid)?)
         }
         Cmd::MicEq(MicCmd::Apply { src, dry_run: true }) => {
@@ -256,14 +312,18 @@ fn dry_run_commands(cmd: &Cmd) -> Result<Option<Vec<Command>>> {
 /// Load a headset EQ profile; returns the preset UID to store with it.
 fn load_profile(src: &ProfileSource) -> Result<(EqProfile, String)> {
     if let Some(name) = &src.preset {
-        let p = eq::preset(name).with_context(|| format!("unknown preset {name:?}; see `ajustectl eq presets`"))?;
+        let p = eq::preset(name)
+            .with_context(|| format!("unknown preset {name:?}; see `ajustectl eq presets`"))?;
         return Ok((p.profile(), p.uid.to_string()));
     }
     let path = src.file.as_ref().unwrap();
     let p = read_toml(path)?;
     p.validate()?;
     // Stable per-file UID so the slot shows a custom preset.
-    let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    let stem = path
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
     Ok((p, format!("custom-{stem}").chars().take(54).collect()))
 }
 
@@ -273,7 +333,12 @@ fn load_mic_profile(src: &ProfileSource) -> Result<(EqProfile, String)> {
             .iter()
             .find(|p| p.name.eq_ignore_ascii_case(name))
             .with_context(|| format!("unknown mic preset {name:?} (Clear, Bass)"))?;
-        return Ok((EqProfile { points: p.points.to_vec() }, p.name.to_string()));
+        return Ok((
+            EqProfile {
+                points: p.points.to_vec(),
+            },
+            p.name.to_string(),
+        ));
     }
     Ok((read_toml(src.file.as_ref().unwrap())?, String::new()))
 }
@@ -288,14 +353,23 @@ fn print_profile(p: &EqProfile) {
         println!("  (flat)");
     }
     for pt in &p.points {
-        println!("  {:<10} {:>5} Hz  {:+5.1} dB  Q {:.3}", pt.filter.label(), pt.freq, pt.gain, pt.q);
+        println!(
+            "  {:<10} {:>5} Hz  {:+5.1} dB  Q {:.3}",
+            pt.filter.label(),
+            pt.freq,
+            pt.gain,
+            pt.q
+        );
     }
 }
 
 fn print_status(dev: &Scape, json: bool) -> Result<()> {
     let st = dev.status()?;
     if json {
-        println!("{}", serde_json::json!({ "device": format!("{:?}", st.kind), "headset": st.headset }));
+        println!(
+            "{}",
+            serde_json::json!({ "device": format!("{:?}", st.kind), "headset": st.headset })
+        );
         return Ok(());
     }
     println!("device:    {:?}", st.kind);
@@ -304,15 +378,37 @@ fn print_status(dev: &Scape, json: bool) -> Result<()> {
         return Ok(());
     };
     println!("battery:   {}%", h.battery_pct);
-    println!("mic:       {}{}", if h.boom_mic_attached { "boom attached" } else { "boom detached" }, if h.muted { ", MUTED" } else { "" });
+    println!(
+        "mic:       {}{}",
+        if h.boom_mic_attached {
+            "boom attached"
+        } else {
+            "boom detached"
+        },
+        if h.muted { ", MUTED" } else { "" }
+    );
     println!("eq slot:   {}", h.eq_slot);
-    println!("sidetone:  {} ({}%, raw {})", if h.sidetone_on { "on" } else { "off" }, h.sidetone_pct(), h.sidetone_raw);
+    println!(
+        "sidetone:  {} ({}%, raw {})",
+        if h.sidetone_on { "on" } else { "off" },
+        h.sidetone_pct(),
+        h.sidetone_raw
+    );
     println!("enc:       {}", if h.enc_on { "on" } else { "off" });
-    println!("lights:    {}", if h.lighting_slot != 0 { "on" } else { "off" });
+    println!(
+        "lights:    {}",
+        if h.lighting_slot != 0 { "on" } else { "off" }
+    );
     println!("battery V: {} mV (unconfirmed)", h.battery_mv);
     println!(
         "raw:       chat={} game={} vol_state={} bt_mode={} hall={} bt_conn={} power={}",
-        h.chat_volume, h.game_volume, h.volume_state, h.bt_mode, h.hall_sensor, h.bt_connection, h.power_state
+        h.chat_volume,
+        h.game_volume,
+        h.volume_state,
+        h.bt_mode,
+        h.hall_sensor,
+        h.bt_connection,
+        h.power_state
     );
     Ok(())
 }

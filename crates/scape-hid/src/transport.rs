@@ -37,21 +37,39 @@ impl Transport {
         let api = HidApi::new()?;
         let info = api
             .device_list()
-            .filter(|d| d.vendor_id() == VID_FRACTAL && matches!(d.product_id(), PID_DONGLE | PID_HEADSET_USB))
+            .filter(|d| {
+                d.vendor_id() == VID_FRACTAL
+                    && matches!(d.product_id(), PID_DONGLE | PID_HEADSET_USB)
+            })
             .find(|d| d.usage_page() == USAGE_PAGE_P911)
             .ok_or(Error::NotFound)?;
         let path = info.path().to_string_lossy().into_owned();
-        let kind = if info.product_id() == PID_DONGLE { DeviceKind::Dongle } else { DeviceKind::WiredHeadset };
+        let kind = if info.product_id() == PID_DONGLE {
+            DeviceKind::Dongle
+        } else {
+            DeviceKind::WiredHeadset
+        };
 
         let dev = info.open_device(&api).map_err(|e| {
             // hidapi flattens errno; check directly so we can give the udev hint.
-            match std::fs::OpenOptions::new().read(true).write(true).open(&path) {
-                Err(io) if io.kind() == std::io::ErrorKind::PermissionDenied => Error::Permission(path.clone()),
+            match std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(&path)
+            {
+                Err(io) if io.kind() == std::io::ErrorKind::PermissionDenied => {
+                    Error::Permission(path.clone())
+                }
                 _ => Error::Hid(e),
             }
         })?;
         log::info!("opened {kind:?} at {path}");
-        Ok(Transport { dev, kind, path, trace: None })
+        Ok(Transport {
+            dev,
+            kind,
+            path,
+            trace: None,
+        })
     }
 
     pub fn set_trace(&mut self, trace: Option<Trace>) {
@@ -84,7 +102,9 @@ impl Transport {
             if left.is_zero() {
                 return Err(Error::Timeout(hex(&report[1..4])));
             }
-            let n = self.dev.read_timeout(&mut buf, left.as_millis().max(1) as i32)?;
+            let n = self
+                .dev
+                .read_timeout(&mut buf, left.as_millis().max(1) as i32)?;
             if n == 0 {
                 continue;
             }

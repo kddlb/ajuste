@@ -71,15 +71,32 @@ pub enum Command {
     /// `A7 04 <slot> <0|1>` (slot 4/5 = factory copies of 2/3).
     GetEq { slot: u8, metadata: bool },
     /// `A7 05 <slot> <rate> <index>`.
-    GetEqCoef { slot: u8, rate: SampleRate, index: u8 },
+    GetEqCoef {
+        slot: u8,
+        rate: SampleRate,
+        index: u8,
+    },
     /// `A7 01 <id<<4|7> <5 points>`.
     SetEqSettings { profile_id: u8, profile: EqProfile },
     /// `A7 02 <id> <rate> <index> b0 b1 b2 a1 a2`.
-    SetEqCoef { profile_id: u8, rate: SampleRate, index: u8, coefs: Coefs },
+    SetEqCoef {
+        profile_id: u8,
+        rate: SampleRate,
+        index: u8,
+        coefs: Coefs,
+    },
     /// `A7 03 <id> <mode> 00000000 <len> <uid>`.
-    CommitEq { profile_id: u8, mode: CommitMode, preset_uid: String },
+    CommitEq {
+        profile_id: u8,
+        mode: CommitMode,
+        preset_uid: String,
+    },
     /// `A7 11 <mic> <chunk> <8×f32>`.
-    SetMicChunk { mic: MicType, chunk: u8, values: [f32; 8] },
+    SetMicChunk {
+        mic: MicType,
+        chunk: u8,
+        values: [f32; 8],
+    },
     /// `A7 12 01 <mic>`.
     CommitMic { mic: MicType },
     /// `A7 12 02 01`.
@@ -158,12 +175,20 @@ impl Command {
                 p.extend([*slot, *metadata as u8]);
             }
             Command::GetEqCoef { slot, rate, index } => p.extend([*slot, rate.code(), *index]),
-            Command::SetEqSettings { profile_id, profile } => {
+            Command::SetEqSettings {
+                profile_id,
+                profile,
+            } => {
                 eq::check_slot(*profile_id)?;
                 profile.validate()?;
                 p.extend(profile.settings_bytes(*profile_id));
             }
-            Command::SetEqCoef { profile_id, rate, index, coefs } => {
+            Command::SetEqCoef {
+                profile_id,
+                rate,
+                index,
+                coefs,
+            } => {
                 eq::check_slot(*profile_id)?;
                 if *index as usize >= eq::MAX_POINTS {
                     return Err(ProtoError::OutOfRange("coef index"));
@@ -173,7 +198,11 @@ impl Command {
                     p.extend(v.to_le_bytes());
                 }
             }
-            Command::CommitEq { profile_id, mode, preset_uid } => {
+            Command::CommitEq {
+                profile_id,
+                mode,
+                preset_uid,
+            } => {
                 eq::check_slot(*profile_id)?;
                 let uid = preset_uid.as_bytes();
                 if uid.len() > PAYLOAD_LEN - 9 {
@@ -249,23 +278,56 @@ mod tests {
             Command::SetLights(true),
             Command::SetLights(false),
             Command::ReadEffect { slot: 1, offset: 0 },
-            Command::Sidetone { op: SidetoneOp::Enable, amount: 1 },
+            Command::Sidetone {
+                op: SidetoneOp::Enable,
+                amount: 1,
+            },
             Command::SelectEq { slot: 2 },
-            Command::GetEq { slot: 1, metadata: false },
-            Command::GetEqCoef { slot: 1, rate: SampleRate::S48k, index: 0 },
-            Command::CommitEq { profile_id: 1, mode: CommitMode::Live, preset_uid: "x".into() },
-            Command::SetMicChunk { mic: MicType::CupMicWb, chunk: 0, values: [0.0; 8] },
-            Command::CommitMic { mic: MicType::CupMicWb },
+            Command::GetEq {
+                slot: 1,
+                metadata: false,
+            },
+            Command::GetEqCoef {
+                slot: 1,
+                rate: SampleRate::S48k,
+                index: 0,
+            },
+            Command::CommitEq {
+                profile_id: 1,
+                mode: CommitMode::Live,
+                preset_uid: "x".into(),
+            },
+            Command::SetMicChunk {
+                mic: MicType::CupMicWb,
+                chunk: 0,
+                values: [0.0; 8],
+            },
+            Command::CommitMic {
+                mic: MicType::CupMicWb,
+            },
             Command::EraseMic,
-            Command::GetMicChunk { mic: MicType::CupMicWb, chunk: 0 },
+            Command::GetMicChunk {
+                mic: MicType::CupMicWb,
+                chunk: 0,
+            },
         ];
         for t in [Target::Dongle, Target::Headset] {
-            for f in [InfoField::FwVersion, InfoField::SerialMsb, InfoField::SerialLsb, InfoField::EditionId, InfoField::BtAddr] {
+            for f in [
+                InfoField::FwVersion,
+                InfoField::SerialMsb,
+                InfoField::SerialLsb,
+                InfoField::EditionId,
+                InfoField::BtAddr,
+            ] {
                 v.push(Command::GetInfo(t, f));
             }
         }
         for p in PRESETS {
-            v.extend(p.profile().apply_commands(3, CommitMode::Save, p.uid).unwrap());
+            v.extend(
+                p.profile()
+                    .apply_commands(3, CommitMode::Save, p.uid)
+                    .unwrap(),
+            );
         }
         v
     }
@@ -278,24 +340,50 @@ mod tests {
             assert!(t != 0xB5 && t != 0x15, "firmware type in {c:?}");
             assert!(t != 0xA5, "lighting stream in {c:?}");
             // Only the slot select (on/off) is allowed from the lighting command set.
-            assert!(t != 0xA4 || (cmd == 0x04 && r[3] <= 1) || cmd == 0x05, "lighting upload in {c:?}");
+            assert!(
+                t != 0xA4 || (cmd == 0x04 && r[3] <= 1) || cmd == 0x05,
+                "lighting upload in {c:?}"
+            );
             if t == DONGLE || t == HEADSET {
-                assert!(![0xF0, 0xF1, 0xF2, 0x15].contains(&cmd), "forbidden factory cmd in {c:?}");
+                assert!(
+                    ![0xF0, 0xF1, 0xF2, 0x15].contains(&cmd),
+                    "forbidden factory cmd in {c:?}"
+                );
             }
         }
     }
 
     #[test]
     fn simple_encodings() {
-        assert_eq!(&Command::GetState(Target::Dongle).encode().unwrap()[..4], &[0x02, 0x11, 0x21, 0]);
-        assert_eq!(&Command::GetState(Target::Headset).encode().unwrap()[..4], &[0x02, 0xF1, 0x21, 0]);
-        assert_eq!(&Command::SetEnc(true).encode().unwrap()[..4], &[0x02, 0xF1, 0x36, 1]);
         assert_eq!(
-            &Command::Sidetone { op: SidetoneOp::VolUp, amount: 10 }.encode().unwrap()[..5],
+            &Command::GetState(Target::Dongle).encode().unwrap()[..4],
+            &[0x02, 0x11, 0x21, 0]
+        );
+        assert_eq!(
+            &Command::GetState(Target::Headset).encode().unwrap()[..4],
+            &[0x02, 0xF1, 0x21, 0]
+        );
+        assert_eq!(
+            &Command::SetEnc(true).encode().unwrap()[..4],
+            &[0x02, 0xF1, 0x36, 1]
+        );
+        assert_eq!(
+            &Command::Sidetone {
+                op: SidetoneOp::VolUp,
+                amount: 10
+            }
+            .encode()
+            .unwrap()[..5],
             &[0x02, 0xF1, 0x34, 2, 10]
         );
-        assert_eq!(&Command::SetLights(false).encode().unwrap()[..4], &[0x02, 0xA4, 0x04, 0]);
-        assert_eq!(&Command::SelectEq { slot: 3 }.encode().unwrap()[..4], &[0x02, 0xA7, 0x07, 3]);
+        assert_eq!(
+            &Command::SetLights(false).encode().unwrap()[..4],
+            &[0x02, 0xA4, 0x04, 0]
+        );
+        assert_eq!(
+            &Command::SelectEq { slot: 3 }.encode().unwrap()[..4],
+            &[0x02, 0xA7, 0x07, 3]
+        );
         assert!(Command::SelectEq { slot: 0 }.encode().is_err());
         assert!(Command::SelectEq { slot: 4 }.encode().is_err());
         assert_eq!(Command::EraseMic.payload().unwrap(), vec![0xA7, 0x12, 2, 1]);
@@ -303,8 +391,15 @@ mod tests {
 
     #[test]
     fn eq_settings_layout() {
-        let prof = EqProfile { points: vec![EqPoint::new(FilterType::Peak, 1000, 3.0, 1.0)] };
-        let p = Command::SetEqSettings { profile_id: 2, profile: prof.clone() }.payload().unwrap();
+        let prof = EqProfile {
+            points: vec![EqPoint::new(FilterType::Peak, 1000, 3.0, 1.0)],
+        };
+        let p = Command::SetEqSettings {
+            profile_id: 2,
+            profile: prof.clone(),
+        }
+        .payload()
+        .unwrap();
         assert_eq!(p.len(), 63);
         assert_eq!(&p[..3], &[0xA7, 0x01, 0x27]);
         assert_eq!(&p[3..7], &[1, 0, 0xE8, 0x03]);
@@ -320,14 +415,28 @@ mod tests {
         assert_eq!(back, prof);
 
         // Flat profile writes a 22 kHz placeholder and parses back as empty.
-        let flat = Command::SetEqSettings { profile_id: 1, profile: EqProfile::default() }.payload().unwrap();
+        let flat = Command::SetEqSettings {
+            profile_id: 1,
+            profile: EqProfile::default(),
+        }
+        .payload()
+        .unwrap();
         assert_eq!(&flat[3..7], &[1, 0, 0xF0, 0x55]);
-        assert_eq!(EqProfile::parse_settings(&flat).unwrap().2, EqProfile::default());
+        assert_eq!(
+            EqProfile::parse_settings(&flat).unwrap().2,
+            EqProfile::default()
+        );
     }
 
     #[test]
     fn commit_layout() {
-        let p = Command::CommitEq { profile_id: 1, mode: CommitMode::Save, preset_uid: "abc".into() }.payload().unwrap();
+        let p = Command::CommitEq {
+            profile_id: 1,
+            mode: CommitMode::Save,
+            preset_uid: "abc".into(),
+        }
+        .payload()
+        .unwrap();
         assert_eq!(p, vec![0xA7, 0x03, 1, 2, 0, 0, 0, 0, 3, b'a', b'b', b'c']);
     }
 
@@ -335,9 +444,22 @@ mod tests {
     fn response_checks() {
         let c = Command::SetEnc(true);
         assert!(c.check_response(&[0xF1, 0x36, 0]).is_ok());
-        assert_eq!(c.check_response(&[0xF1, 0x36, 1]), Err(ProtoError::Status(1)));
-        assert!(matches!(c.check_response(&[0xF1, 0x21, 0]), Err(ProtoError::Mismatch { .. })));
+        assert_eq!(
+            c.check_response(&[0xF1, 0x36, 1]),
+            Err(ProtoError::Status(1))
+        );
+        assert!(matches!(
+            c.check_response(&[0xF1, 0x21, 0]),
+            Err(ProtoError::Mismatch { .. })
+        ));
         // GET_EQ ignores byte 2.
-        assert!(Command::GetEq { slot: 1, metadata: false }.check_response(&[0xA7, 0x04, 0x17]).is_ok());
+        assert!(
+            Command::GetEq {
+                slot: 1,
+                metadata: false
+            }
+            .check_response(&[0xA7, 0x04, 0x17])
+            .is_ok()
+        );
     }
 }

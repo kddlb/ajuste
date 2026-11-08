@@ -47,8 +47,15 @@ pub enum ProtoError {
     OutOfRange(&'static str),
     #[error("response too short ({0} bytes)")]
     Short(usize),
-    #[error("response is for {got_type:#04x}/{got_cmd:#04x}, expected {want_type:#04x}/{want_cmd:#04x}")]
-    Mismatch { want_type: u8, want_cmd: u8, got_type: u8, got_cmd: u8 },
+    #[error(
+        "response is for {got_type:#04x}/{got_cmd:#04x}, expected {want_type:#04x}/{want_cmd:#04x}"
+    )]
+    Mismatch {
+        want_type: u8,
+        want_cmd: u8,
+        got_type: u8,
+        got_cmd: u8,
+    },
     #[error("device returned status {0:#04x}")]
     Status(u8),
 }
@@ -57,5 +64,9 @@ pub type Result<T> = std::result::Result<T, ProtoError>;
 
 /// Format bytes as space-separated hex, for logs and `--hex` output.
 pub fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect::<Vec<_>>().join(" ")
+    bytes
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect::<Vec<_>>()
+        .join(" ")
 }

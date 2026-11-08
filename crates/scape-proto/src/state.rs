@@ -13,7 +13,9 @@ pub struct DongleState {
 impl DongleState {
     pub fn parse(data: &[u8]) -> Result<Self> {
         let b = *data.get(3).ok_or(ProtoError::Short(data.len()))?;
-        Ok(DongleState { headset_connected: b == 1 })
+        Ok(DongleState {
+            headset_connected: b == 1,
+        })
     }
 }
 
@@ -95,7 +97,10 @@ pub fn parse_fw_version(d: &[u8]) -> Result<String> {
 /// NUL-terminated ASCII starting at byte 3 (20 chars on real hardware).
 pub fn parse_serial_half(d: &[u8]) -> Result<String> {
     let v = d.get(3..).ok_or(ProtoError::Short(d.len()))?;
-    Ok(v.iter().take_while(|&&b| b != 0).map(|&b| b as char).collect())
+    Ok(v.iter()
+        .take_while(|&&b| b != 0)
+        .map(|&b| b as char)
+        .collect())
 }
 
 pub fn parse_edition(d: &[u8]) -> Result<u8> {
@@ -104,7 +109,10 @@ pub fn parse_edition(d: &[u8]) -> Result<u8> {
 
 pub fn parse_bt_addr(d: &[u8]) -> Result<String> {
     let v = d.get(3..9).ok_or(ProtoError::Short(d.len()))?;
-    Ok(v.iter().map(|b| format!("{b:02X}")).collect::<Vec<_>>().join(":"))
+    Ok(v.iter()
+        .map(|b| format!("{b:02X}"))
+        .collect::<Vec<_>>()
+        .join(":"))
 }
 
 #[cfg(test)]

@@ -48,7 +48,10 @@ impl Coefs {
             SampleRate::S48k => (-1.873_204_42, 0.877_223_70),
             SampleRate::S96k => (-1.935_598_18, 0.936_635_08),
         };
-        Coefs { b: [1.0, a1, a2], a: [a1, a2] }
+        Coefs {
+            b: [1.0, a1, a2],
+            a: [a1, a2],
+        }
     }
 
     /// Linear magnitude |H(e^jw)| at `freq` Hz.
@@ -68,7 +71,13 @@ impl Coefs {
 
 /// Design one filter for one sample rate.
 pub fn design(p: &EqPoint, rate: SampleRate) -> Coefs {
-    design_f64(p.filter, f64::from(p.freq), f64::from(p.gain), f64::from(p.q), rate.hz())
+    design_f64(
+        p.filter,
+        f64::from(p.freq),
+        f64::from(p.gain),
+        f64::from(p.q),
+        rate.hz(),
+    )
 }
 
 pub fn design_f64(filter: FilterType, f: f64, gain_db: f64, q: f64, fs: f64) -> Coefs {
@@ -79,7 +88,14 @@ pub fn design_f64(filter: FilterType, f: f64, gain_db: f64, q: f64, fs: f64) -> 
     let sa = a.sqrt();
 
     let (b0, b1, b2, a0, a1, a2) = match filter {
-        FilterType::Peak => (1.0 + alpha * a, -2.0 * cw, 1.0 - alpha * a, 1.0 + alpha / a, -2.0 * cw, 1.0 - alpha / a),
+        FilterType::Peak => (
+            1.0 + alpha * a,
+            -2.0 * cw,
+            1.0 - alpha * a,
+            1.0 + alpha / a,
+            -2.0 * cw,
+            1.0 - alpha / a,
+        ),
         FilterType::LowShelf => (
             a * ((a + 1.0) - (a - 1.0) * cw + 2.0 * sa * alpha),
             2.0 * a * ((a - 1.0) - (a + 1.0) * cw),
@@ -96,10 +112,31 @@ pub fn design_f64(filter: FilterType, f: f64, gain_db: f64, q: f64, fs: f64) -> 
             2.0 * ((a - 1.0) - (a + 1.0) * cw),
             (a + 1.0) - (a - 1.0) * cw - 2.0 * sa * alpha,
         ),
-        FilterType::LowPass => ((1.0 - cw) / 2.0, 1.0 - cw, (1.0 - cw) / 2.0, 1.0 + alpha, -2.0 * cw, 1.0 - alpha),
-        FilterType::HighPass => ((1.0 + cw) / 2.0, -(1.0 + cw), (1.0 + cw) / 2.0, 1.0 + alpha, -2.0 * cw, 1.0 - alpha),
+        FilterType::LowPass => (
+            (1.0 - cw) / 2.0,
+            1.0 - cw,
+            (1.0 - cw) / 2.0,
+            1.0 + alpha,
+            -2.0 * cw,
+            1.0 - alpha,
+        ),
+        FilterType::HighPass => (
+            (1.0 + cw) / 2.0,
+            -(1.0 + cw),
+            (1.0 + cw) / 2.0,
+            1.0 + alpha,
+            -2.0 * cw,
+            1.0 - alpha,
+        ),
         FilterType::Notch => (1.0, -2.0 * cw, 1.0, 1.0 + alpha, -2.0 * cw, 1.0 - alpha),
-        FilterType::BandPass => (sw / 2.0, 0.0, -sw / 2.0, 1.0 + alpha, -2.0 * cw, 1.0 - alpha),
+        FilterType::BandPass => (
+            sw / 2.0,
+            0.0,
+            -sw / 2.0,
+            1.0 + alpha,
+            -2.0 * cw,
+            1.0 - alpha,
+        ),
     };
     Coefs {
         b: [(b0 / a0) as f32, (b1 / a0) as f32, (b2 / a0) as f32],
@@ -109,6 +146,9 @@ pub fn design_f64(filter: FilterType, f: f64, gain_db: f64, q: f64, fs: f64) -> 
 
 /// Combined response of a filter chain in dB at `freq`.
 pub fn chain_db(points: &[EqPoint], freq: f64, rate: SampleRate) -> f64 {
-    let mag: f64 = points.iter().map(|p| design(p, rate).magnitude(freq, rate.hz())).product();
+    let mag: f64 = points
+        .iter()
+        .map(|p| design(p, rate).magnitude(freq, rate.hz()))
+        .product();
     20.0 * mag.log10()
 }

@@ -2,8 +2,8 @@
 
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::*;
-use scape_proto::biquad::{self, SampleRate};
 use scape_proto::EqPoint;
+use scape_proto::biquad::{self, SampleRate};
 
 const F_MIN: f64 = 20.0;
 const F_MAX: f64 = 20_000.0;
@@ -52,9 +52,17 @@ pub fn response_curve(points: Vec<EqPoint>, cx: &App) -> impl IntoElement {
             let mut path = PathBuilder::stroke(px(2.));
             for i in 0..=SAMPLES {
                 let f = F_MIN * (F_MAX / F_MIN).powf(i as f64 / SAMPLES as f64);
-                let db = if points.is_empty() { 0.0 } else { biquad::chain_db(&points, f, SampleRate::S48k) };
+                let db = if points.is_empty() {
+                    0.0
+                } else {
+                    biquad::chain_db(&points, f, SampleRate::S48k)
+                };
                 let p = point(x_of(f, &bounds), y_of(db, &bounds));
-                if i == 0 { path.move_to(p) } else { path.line_to(p) }
+                if i == 0 {
+                    path.move_to(p)
+                } else {
+                    path.line_to(p)
+                }
             }
             if let Ok(path) = path.build() {
                 window.paint_path(path, line);
