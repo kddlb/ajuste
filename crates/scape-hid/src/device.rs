@@ -157,6 +157,12 @@ impl Scape {
         ))
     }
 
+    /// Render and upload a lighting effect into slot 1, then select it (as Adjust Pro does).
+    pub fn upload_effect(&self, spec: &scape_proto::effects::EffectSpec) -> Result<()> {
+        self.require_headset()?;
+        self.run(&spec.upload_commands())
+    }
+
     pub fn set_enc(&self, on: bool) -> Result<()> {
         self.require_headset()?;
         self.send(&Command::SetEnc(on)).map(drop)
@@ -242,21 +248,20 @@ impl Scape {
         self.run(&cmds)
     }
 
-    pub fn apply_mic_eq(&self, profile: &EqProfile) -> Result<()> {
+    pub fn apply_mic_eq(&self, profile: &EqProfile, mic: MicType) -> Result<()> {
         profile.validate()?;
         self.require_headset()?;
-        self.run(&mic::apply_commands(profile, MicType::CupMicWb))
+        self.run(&mic::apply_commands(profile, mic))
     }
 
-    pub fn erase_mic_eq(&self) -> Result<()> {
+    pub fn erase_mic_eq(&self, mic: MicType) -> Result<()> {
         self.require_headset()?;
-        self.send(&Command::EraseMic).map(drop)
+        self.send(&Command::EraseMic { mic }).map(drop)
     }
 
     /// Read back the stored mic magnitude table (dB values).
-    pub fn read_mic_table(&self) -> Result<Vec<f32>> {
+    pub fn read_mic_table(&self, mic: MicType) -> Result<Vec<f32>> {
         self.require_headset()?;
-        let mic = MicType::CupMicWb;
         let mut out = Vec::with_capacity(mic::TABLE_LEN);
         for chunk in 0..mic.chunks() {
             let d = self.send_reply(&Command::GetMicChunk { mic, chunk })?;

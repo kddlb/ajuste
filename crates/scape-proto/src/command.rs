@@ -46,6 +46,9 @@ mod cmd {
     pub const SET_MIC_EQ: u8 = 0x11;
     pub const COMMIT_MIC_EQ: u8 = 0x12;
     pub const GET_MIC_EQ: u8 = 0x13;
+    pub const SET_EFFECT: u8 = 0x01;
+    pub const SEND_EFFECT: u8 = 0x02;
+    pub const COMMIT_EFFECT: u8 = 0x03;
     pub const SELECT_EFFECT_SLOT: u8 = 0x04;
     pub const READ_EFFECT: u8 = 0x05;
 }
@@ -63,6 +66,12 @@ pub enum Command {
     /// `A4 04 <0|1>` — lighting slot 0 = LEDs off, 1 = the stored effect (Adjust Pro's
     /// `turnLight`). The only lighting command this crate can encode.
     SetLights(bool),
+    /// `A4 01 <slot> <sum8> <lenLo> <lenHi>` — start a lighting upload (see `effects`).
+    SetEffect { slot: u8, checksum: u8, len: u16 },
+    /// `A4 02 <n> <n bytes>` — one ≤60-byte chunk of upload data.
+    SendEffect { data: Vec<u8> },
+    /// `A4 03` — commit the uploaded effect.
+    CommitEffect,
     /// `A4 05 <slot> <offHi> <offLo>` — read stored effect data (read-only). Offset 0 returns
     /// the 42-byte metadata header at reply offset 10.
     ReadEffect { slot: u8, offset: u16 },
@@ -99,8 +108,8 @@ pub enum Command {
     },
     /// `A7 12 01 <mic>`.
     CommitMic { mic: MicType },
-    /// `A7 12 02 01`.
-    EraseMic,
+    /// `A7 12 02 <mic>`.
+    EraseMic { mic: MicType },
     /// `A7 13 <mic> <chunk>`.
     GetMicChunk { mic: MicType, chunk: u8 },
 }
@@ -110,7 +119,11 @@ impl Command {
         match self {
             Command::GetState(t) | Command::GetInfo(t, _) => t.type_byte(),
             Command::SetEnc(_) | Command::Sidetone { .. } => HEADSET,
-            Command::SetLights(_) | Command::ReadEffect { .. } => EFFECT,
+            Command::SetLights(_)
+            | Command::ReadEffect { .. }
+            | Command::SetEffect { .. }
+            | Command::SendEffect { .. }
+            | Command::CommitEffect => EFFECT,
             _ => EQ,
         }
     }
@@ -122,6 +135,9 @@ impl Command {
             Command::SetEnc(_) => cmd::ENC_CONTROL,
             Command::Sidetone { .. } => cmd::SIDE_TONE_CONTROL,
             Command::SetLights(_) => cmd::SELECT_EFFECT_SLOT,
+            Command::SetEffect { .. } => cmd::SET_EFFECT,
+            Command::SendEffect { .. } => cmd::SEND_EFFECT,
+            Command::CommitEffect => cmd::COMMIT_EFFECT,
             Command::ReadEffect { .. } => cmd::READ_EFFECT,
             Command::SelectEq { .. } => cmd::SELECT_EQ_MODE,
             Command::GetEq { .. } => cmd::GET_EQ_SETTINGS,
@@ -130,7 +146,7 @@ impl Command {
             Command::SetEqCoef { .. } => cmd::SET_EQ_COEF,
             Command::CommitEq { .. } => cmd::COMMIT_EQ,
             Command::SetMicChunk { .. } => cmd::SET_MIC_EQ,
-            Command::CommitMic { .. } | Command::EraseMic => cmd::COMMIT_MIC_EQ,
+            Command::CommitMic { .. } | Command::EraseMic { .. } => cmd::COMMIT_MIC_EQ,
             Command::GetMicChunk { .. } => cmd::GET_MIC_EQ,
         }
     }
@@ -159,6 +175,27 @@ impl Command {
         match self {
             Command::GetState(_) | Command::GetInfo(..) => {}
             Command::SetEnc(on) | Command::SetLights(on) => p.push(*on as u8),
+            Command::SetEffect {
+                slot,
+                checksum,
+                len,
+            } => {
+                if *slot != crate::effects::SLOT {
+                    return Err(ProtoError::OutOfRange(
+                        "effects are only uploaded to slot 1",
+                    ));
+                }
+                p.extend([*slot, *checksum]);
+                p.extend(len.to_le_bytes());
+            }
+            Command::SendEffect { data } => {
+                if data.is_empty() || data.len() > crate::effects::CHUNK {
+                    return Err(ProtoError::OutOfRange("effect chunk must be 1..=60 bytes"));
+                }
+                p.push(data.len() as u8);
+                p.extend(data);
+            }
+            Command::CommitEffect => {}
             Command::ReadEffect { slot, offset } => {
                 p.push(*slot);
                 p.extend(offset.to_be_bytes());
@@ -223,7 +260,7 @@ impl Command {
                 }
             }
             Command::CommitMic { mic } => p.extend([1, *mic as u8]),
-            Command::EraseMic => p.extend([2, 1]),
+            Command::EraseMic { mic } => p.extend([2, *mic as u8]),
             Command::GetMicChunk { mic, chunk } => p.extend([*mic as u8, *chunk]),
         }
         debug_assert!(p.len() <= PAYLOAD_LEN);
@@ -305,7 +342,9 @@ mod tests {
             Command::CommitMic {
                 mic: MicType::CupMicWb,
             },
-            Command::EraseMic,
+            Command::EraseMic {
+                mic: MicType::CupMicWb,
+            },
             Command::GetMicChunk {
                 mic: MicType::CupMicWb,
                 chunk: 0,
@@ -322,6 +361,15 @@ mod tests {
                 v.push(Command::GetInfo(t, f));
             }
         }
+        v.extend(
+            crate::effects::EffectSpec {
+                preset_id: 6,
+                pattern: crate::effects::Pattern::Still([0, 0x74, 0xc5]),
+                speed: 100,
+                brightness: 100,
+            }
+            .upload_commands(),
+        );
         for p in PRESETS {
             v.extend(
                 p.profile()
@@ -339,10 +387,14 @@ mod tests {
             let (t, cmd) = (r[1], r[2]);
             assert!(t != 0xB5 && t != 0x15, "firmware type in {c:?}");
             assert!(t != 0xA5, "lighting stream in {c:?}");
-            // Only the slot select (on/off) is allowed from the lighting command set.
+            // Lighting: only the frame-based upload into slot 1 (A4 01–03), slot select 0/1
+            // and the read. No timestamp/boot effects, sub-device writes or streaming.
             assert!(
-                t != 0xA4 || (cmd == 0x04 && r[3] <= 1) || cmd == 0x05,
-                "lighting upload in {c:?}"
+                t != 0xA4
+                    || matches!(cmd, 0x02 | 0x03 | 0x05)
+                    || (cmd == 0x01 && r[3] == 1)
+                    || (cmd == 0x04 && r[3] <= 1),
+                "unexpected lighting command in {c:?}"
             );
             if t == DONGLE || t == HEADSET {
                 assert!(
@@ -386,7 +438,14 @@ mod tests {
         );
         assert!(Command::SelectEq { slot: 0 }.encode().is_err());
         assert!(Command::SelectEq { slot: 4 }.encode().is_err());
-        assert_eq!(Command::EraseMic.payload().unwrap(), vec![0xA7, 0x12, 2, 1]);
+        assert_eq!(
+            Command::EraseMic {
+                mic: MicType::CupMicWb
+            }
+            .payload()
+            .unwrap(),
+            vec![0xA7, 0x12, 2, 1]
+        );
     }
 
     #[test]

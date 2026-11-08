@@ -8,6 +8,7 @@
 
 pub mod biquad;
 pub mod command;
+pub mod effects;
 pub mod eq;
 pub mod lighting;
 pub mod mic;

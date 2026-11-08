@@ -5,7 +5,6 @@ use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand, ValueEnum};
 use scape_hid::{Direction, Scape};
 use scape_proto::eq::{self, CommitMode, EqProfile};
-use scape_proto::mic::{self, MIC_PRESETS, MicType};
 use scape_proto::{Command, Target, hex};
 
 #[derive(Parser)]
@@ -37,6 +36,21 @@ enum Cmd {
     Enc { state: OnOff },
     /// Headset LEDs on (stored effect) or off.
     Lights { state: OnOff },
+    /// Upload a lighting preset into slot 1 (see `lights-presets`).
+    LightsSet {
+        /// Preset name, e.g. "Sunset" or "Fractal blue".
+        preset: String,
+        /// LED brightness 0–100.
+        #[arg(long, default_value_t = 100, value_parser = clap::value_parser!(u8).range(0..=100))]
+        brightness: u8,
+        /// Override the preset's speed (10–100; ignored for still colours).
+        #[arg(long, value_parser = clap::value_parser!(u8).range(10..=100))]
+        speed: Option<u8>,
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// List lighting presets ajuste can upload.
+    LightsPresets,
     /// Dump stored lighting effect metadata (read-only).
     LightsShow {
         #[arg(default_value_t = 1)]
@@ -52,9 +66,6 @@ enum Cmd {
     /// Headset EQ.
     #[command(subcommand)]
     Eq(EqCmd),
-    /// Microphone EQ.
-    #[command(subcommand, name = "mic-eq")]
-    MicEq(MicCmd),
 }
 
 #[derive(Subcommand)]
@@ -80,24 +91,6 @@ enum EqCmd {
         /// Preset ID stored with the slot (defaults to the preset's, or one derived from the file name).
         #[arg(long)]
         uid: Option<String>,
-        #[arg(long)]
-        dry_run: bool,
-    },
-}
-
-#[derive(Subcommand)]
-enum MicCmd {
-    /// Read back the stored dB table.
-    Show,
-    /// Write and commit a mic EQ.
-    Apply {
-        #[command(flatten)]
-        src: ProfileSource,
-        #[arg(long)]
-        dry_run: bool,
-    },
-    /// Erase the stored mic EQ.
-    Erase {
         #[arg(long)]
         dry_run: bool,
     },
@@ -171,6 +164,41 @@ fn main() -> Result<()> {
         Cmd::Lights { state } => {
             dev.set_lights(state.on())?;
             confirm(&dev, |s| (s.lighting_slot != 0) == state.on(), "lights")?;
+        }
+        Cmd::LightsSet {
+            preset,
+            brightness,
+            speed,
+            ..
+        } => {
+            let spec = lights_spec(&preset, brightness, speed)?;
+            let n = spec.upload_commands().len();
+            dev.upload_effect(&spec)?;
+            println!("uploaded {preset} ({n} reports); reading back…");
+            match scape_proto::lighting::Effect::parse(&dev.read_effect_raw(1)?) {
+                Some(e) => println!("slot 1 now: {} ({})", e.label(), e.mode_name()),
+                None => bail!("slot 1 has no readable effect after upload"),
+            }
+        }
+        Cmd::LightsPresets => {
+            use scape_proto::effects::{PRESETS, Pattern};
+            for p in PRESETS {
+                let cols: Vec<String> = match p.pattern() {
+                    Pattern::Still(c) => vec![c],
+                    Pattern::Shift(cs) => cs.to_vec(),
+                    Pattern::TwoColorFade(a, b) => vec![a, b],
+                }
+                .iter()
+                .map(|c| format!("#{:02X}{:02X}{:02X}", c[0], c[1], c[2]))
+                .collect();
+                println!(
+                    "{:<17} {:<16} speed {:>3}  {}",
+                    p.name,
+                    p.mode_name(),
+                    p.speed,
+                    cols.join(" ")
+                );
+            }
         }
         Cmd::LightsShow { slot } => {
             let d = dev.read_effect_raw(slot)?;
@@ -258,21 +286,6 @@ fn main() -> Result<()> {
                 if save { "saved" } else { "live, not persisted" }
             );
         }
-        Cmd::MicEq(MicCmd::Show) => {
-            let t = dev.read_mic_table()?;
-            for (k, v) in t.iter().enumerate().step_by(16) {
-                println!("{:>7.1} Hz  {v:+6.2} dB", mic::table_freq(k));
-            }
-        }
-        Cmd::MicEq(MicCmd::Apply { src, .. }) => {
-            let (profile, _) = load_mic_profile(&src)?;
-            dev.apply_mic_eq(&profile)?;
-            println!("mic EQ saved");
-        }
-        Cmd::MicEq(MicCmd::Erase { .. }) => {
-            dev.erase_mic_eq()?;
-            println!("mic EQ erased");
-        }
     }
     Ok(())
 }
@@ -283,6 +296,12 @@ fn dry_run_commands(cmd: &Cmd) -> Result<Option<Vec<Command>>> {
             slot,
             dry_run: true,
         }) => Some(vec![Command::SelectEq { slot: *slot }]),
+        Cmd::LightsSet {
+            preset,
+            brightness,
+            speed,
+            dry_run: true,
+        } => Some(lights_spec(preset, *brightness, *speed)?.upload_commands()),
         Cmd::Eq(EqCmd::Apply {
             slot,
             src,
@@ -299,14 +318,23 @@ fn dry_run_commands(cmd: &Cmd) -> Result<Option<Vec<Command>>> {
             };
             Some(p.apply_commands(*slot, mode, &uid)?)
         }
-        Cmd::MicEq(MicCmd::Apply { src, dry_run: true }) => {
-            let (p, _) = load_mic_profile(src)?;
-            p.validate()?;
-            Some(mic::apply_commands(&p, MicType::CupMicWb))
-        }
-        Cmd::MicEq(MicCmd::Erase { dry_run: true }) => Some(vec![Command::EraseMic]),
         _ => None,
     })
+}
+
+fn lights_spec(
+    name: &str,
+    brightness: u8,
+    speed: Option<u8>,
+) -> Result<scape_proto::effects::EffectSpec> {
+    let p = scape_proto::effects::preset(name).with_context(|| {
+        format!("unknown lighting preset {name:?}; see `ajustectl lights-presets`")
+    })?;
+    let mut spec = p.spec(brightness);
+    if let Some(s) = speed {
+        spec.speed = s;
+    }
+    Ok(spec)
 }
 
 /// Load a headset EQ profile; returns the preset UID to store with it.
@@ -325,22 +353,6 @@ fn load_profile(src: &ProfileSource) -> Result<(EqProfile, String)> {
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_default();
     Ok((p, format!("custom-{stem}").chars().take(54).collect()))
-}
-
-fn load_mic_profile(src: &ProfileSource) -> Result<(EqProfile, String)> {
-    if let Some(name) = &src.preset {
-        let p = MIC_PRESETS
-            .iter()
-            .find(|p| p.name.eq_ignore_ascii_case(name))
-            .with_context(|| format!("unknown mic preset {name:?} (Clear, Bass)"))?;
-        return Ok((
-            EqProfile {
-                points: p.points.to_vec(),
-            },
-            p.name.to_string(),
-        ));
-    }
-    Ok((read_toml(src.file.as_ref().unwrap())?, String::new()))
 }
 
 fn read_toml(path: &PathBuf) -> Result<EqProfile> {

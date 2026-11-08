@@ -240,3 +240,54 @@ Tests used slot 3. Slot 1 holds the user's own custom EQ (`Sv7n2oVHjUk6av7JenMs0
   `ec 0f` = 4076 at 92%). It drifts by a few mV between polls.
 - b7 = 0x99 and b8 = 0xff (Adjust Pro's "chat volume") stayed constant all session, but **reset to 00 00 after a
   BT-mode round trip**. They don't follow crown volume changes. Meaning unknown.
+
+## 7. Live WebHID capture of Adjust Pro (2026-11-08)
+
+Captured by wrapping `HIDDevice.prototype.sendReport` and listening for `inputreport` in the page.
+
+- **Polling:** `11 21` then `F1 21` every 1.5 s. The dongle replies in ~3 ms, the headset (over the radio) in ~35–40 ms.
+- **Connect sequence:** `11 02`, `11 01`, `11 04`, then `F1 01`, `F1 02`, `F1 04`, `F1 05`, then `A4 0E 99` ×2 (subdevice
+  name for the headset, sub-device 0x99; empty reply). The app sent `11 01` before the `11 02` reply arrived, so it
+  does not strictly serialise. **`F1 05` (BT address) returns status 1 (error)** in the app, so the BT address
+  `ajustectl info` printed is suspect. No EQ or lighting reads happen at connect.
+- **Opening the Audio page:**
+  - For each slot it sends `A7 04 n 0`, `A7 04 n 1`, then reads back every coefficient with
+    `A7 05 slot rate idx`. The reply layout is `A7 05 00 slot rate idx b0 b1 b2 a1 a2`.
+  - It then **re-saves the active slot**, unchanged, with **Save (mode 2) and a freshly generated nanoid preset
+    ID**. Opening a slot's tab does the same. So the app writes flash on every visit, and slot IDs change
+    constantly (slot 1 went `Sv7n2o…` → `6fb85603-…` → `l6KtEmk…`).
+- **Selecting a slot tab** sends `A7 07 n`. The device **does reply** to this (status 0), even though the bundle marks
+  it as no-response. The app ignores the reply, and ajuste's drain-before-send makes it harmless.
+- **Editing:** each change sends `A7 01` + `A7 02`×n + `A7 03 slot 01` (live), reusing the slot's current ID.
+  **Save** is the same sequence with mode 2.
+- **COMMIT reply:** `A7 03 00 <slot> 00 00 00 01 00 <x> 00 <y> 00 90 6b 00 22`, then bytes that change every call.
+  x/y vary (0x17/02, 0x21/03, 0x0d/01). The tail looks like uninitialised buffer contents.
+- **Mic EQ is a hidden feature.** The bundle contains the full mic EQ protocol and presets, but Adjust Pro's UI never
+  exposes it, and no `A7 11/12/13` traffic appeared while using the app. The app's mic page only previews a
+  `getUserMedia` stream through WebAudio filters in the browser.
+- **Mic EQ has no audible effect (tested).** We recorded the dongle's USB capture with the table flat and with the
+  "Bass" table (+8 dB low shelf, low-pass at 1 kHz), using speech for CupMicWB and white noise for BoomMicWB with the
+  boom attached and ENC off. All band levels (100–300 Hz, 0.5–1 kHz, 2–6 kHz, 6–8 kHz) stayed within 0.7 dB; the
+  expected change was 12–16 dB. The SWB types (3/4) and "only applied after a power cycle" were not tested. Removed
+  from the CLI and GUI. The encoder stays in `scape-proto`/`scape-hid` for reference. Both WB tables were erased
+  back to flat afterwards.
+
+## 8. Lighting upload (verified, 2026-11-08)
+
+Captured three uploads from Adjust Pro and reproduced them **byte-for-byte** in `scape-proto::effects`
+(`tests/effects.rs`, fixtures in `tests/fixtures/`). ajuste's own upload of "Northern lights" was confirmed on the LEDs.
+
+```text
+A4 01 01 <sum8> <lenLo> <lenHi>   SET_EFFECT (slot 1, byte-sum of data mod 256, little-endian length)
+A4 02 <n≤60> <data, 0-padded>     SEND_EFFECT × ceil(len/60), each acked
+A4 03                             COMMIT_EFFECT
+A4 04 01                          SELECT slot 1
+data = A5 5A <frames> FF <fps=20> <secs> <[preset, mode, speed, colours…, extras…, brightness] padded to 42> ++ frames
+```
+
+- Frames are 12 LEDs × RGB. `secs = 11 − ⌊clamp(speed,10,100)/10⌋`, and the frame count is `secs × 20`. Shift is the exception:
+  `6 × round(secs × 20 / 6)` (Sunset: 78).
+- Colours are scaled by brightness, `round(c × b/100)`, before rendering. The metadata keeps the unscaled colours.
+- Renderers ported: still, shift, two-colour fade. They use tinycolor `mix` = `round(a + (b − a)·p)` per channel, and JS
+  `Math.round`. Not yet ported: breathe, meshify, lava lamp, wave ripple, torrent, radius.
+- Adjust Pro uses the `A4 01` / `A4 02` uploads for the headset (not the timestamp variant `A4 11–13`).

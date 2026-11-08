@@ -32,16 +32,17 @@ ajustectl watch
 ajustectl enc on|off
 ajustectl lights on|off             # LEDs off/on (keeps the stored effect)
 ajustectl lights-show                # decode the stored effect (e.g. "Sunset")
+ajustectl lights-presets             # 17 built-in themes (still, shift, two-colour fade)
+ajustectl lights-set "Northern lights" --brightness 60
 ajustectl sidetone on --level 40   # 10 % steps
 ajustectl eq presets
 ajustectl eq show [1-3]
 ajustectl eq select 2
 ajustectl eq apply 1 --preset clarity            # live preview, not persisted
 ajustectl eq apply 1 --file my.toml --save       # persist to slot
-ajustectl mic-eq apply --preset bass
 ```
 
-Add `--hex` to any command to see the raw reports, and `--dry-run` to the EQ/mic writers
+Add `--hex` to any command to see the raw reports, and `--dry-run` to the EQ writers
 to print the reports without sending anything. EQ profile files:
 
 ```toml
@@ -61,7 +62,7 @@ from the tray menu. Settings and saved presets: `~/.config/ajuste/config.toml`
 ## Safety
 
 `scape-proto` cannot encode firmware-upgrade (0xB5/0x15), FACTORY_RESET (0xF2),
-INITIALIZE/SHUTDOWN, or any lighting command except the on/off slot select (`A4 04 0|1`).
+INITIALIZE/SHUTDOWN, lighting streaming, boot/timestamp effects, or uploads to any slot other than 1.
 A unit test enforces this.
 
 ## Hardware verification checklist
@@ -78,4 +79,3 @@ yet. Check them in this order:
    (`F1 34 00`), so check that one with extra care.
 4. `eq apply 1 --preset depth`: it should be audible and should be gone after a power
    cycle. Only after that, try `--save`.
-5. `mic-eq apply --preset clear` (flat).

@@ -1,21 +1,24 @@
-//! Main window: status header + Device / Headset EQ / Mic EQ tabs.
+//! Main window: status header + Device / EQ tabs.
 
+use gpui_kit::component::button::Button;
 use gpui_kit::component::progress::Progress;
 use gpui_kit::component::slider::{Slider, SliderEvent, SliderState};
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::tab::{Tab, TabBar};
-use gpui_kit::component::{ActiveTheme, Disableable, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme, Disableable, Selectable, Sizable, h_flex, v_flex};
+use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use scape_proto::effects;
 
-use crate::eq_editor::{EditorKind, EqEditor};
+use crate::eq_editor::EqEditor;
 use crate::model::{DeviceModel, Link};
 
 pub struct MainView {
     model: Entity<DeviceModel>,
     tab: usize,
     sidetone: Entity<SliderState>,
+    brightness: Entity<SliderState>,
     headset_eq: Entity<EqEditor>,
-    mic_eq: Entity<EqEditor>,
     _subs: Vec<Subscription>,
 }
 
@@ -28,8 +31,14 @@ impl MainView {
                 .step(10.0)
                 .default_value(0.0)
         });
-        let headset_eq = cx.new(|cx| EqEditor::new(model.clone(), EditorKind::Headset, cx));
-        let mic_eq = cx.new(|cx| EqEditor::new(model.clone(), EditorKind::Mic, cx));
+        let brightness = cx.new(|_| {
+            SliderState::new()
+                .min(0.0)
+                .max(100.0)
+                .step(5.0)
+                .default_value(100.0)
+        });
+        let headset_eq = cx.new(|cx| EqEditor::new(model.clone(), cx));
 
         let subs = vec![
             // Keep the sidetone slider in sync with polled state unless the user is dragging.
@@ -41,6 +50,13 @@ impl MainView {
                             .update(cx, |s, cx| s.set_value(pct, window, cx));
                     }
                 }
+                if let Some(e) = &model.read(cx).effect {
+                    let b = f32::from(e.brightness);
+                    if this.brightness.read(cx).value().start() != b {
+                        this.brightness
+                            .update(cx, |s, cx| s.set_value(b, window, cx));
+                    }
+                }
                 cx.notify();
             }),
             cx.subscribe(&sidetone, |this, _, ev: &SliderEvent, cx| {
@@ -50,13 +66,28 @@ impl MainView {
                         .update(cx, |m, cx| m.set_sidetone(true, Some(pct), cx));
                 }
             }),
+            // Re-upload the current preset at the new brightness when the slider is released.
+            cx.subscribe(&brightness, |this, _, ev: &SliderEvent, cx| {
+                if let SliderEvent::Release(v) = ev {
+                    let b = v.start().round() as u8;
+                    this.model.update(cx, |m, cx| {
+                        let preset = m
+                            .effect
+                            .as_ref()
+                            .and_then(|e| effects::PRESETS.iter().find(|p| p.id == e.preset_id));
+                        if let Some(p) = preset {
+                            m.set_effect(p.spec(b), cx);
+                        }
+                    });
+                }
+            }),
         ];
         MainView {
             model,
             tab: 0,
             sidetone,
+            brightness,
             headset_eq,
-            mic_eq,
             _subs: subs,
         }
     }
@@ -115,6 +146,60 @@ impl MainView {
             col = col.child(div().text_sm().text_color(theme.danger).child(err.clone()));
         }
         col
+    }
+
+    fn render_presets(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let m = self.model.read(cx);
+        let live = m.headset().is_some();
+        let uploading = m.uploading;
+        let current = m.effect.as_ref().map(|e| e.preset_id);
+        let known = current.is_some_and(|id| effects::PRESETS.iter().any(|p| p.id == id));
+        let muted = cx.theme().muted_foreground;
+        let mut grid = h_flex().gap_1().flex_wrap();
+        for p in effects::PRESETS {
+            grid = grid.child(
+                Button::new(SharedString::from(format!("light-{}", p.id)))
+                    .label(p.name)
+                    .xsmall()
+                    .selected(current == Some(p.id))
+                    .disabled(!live || uploading)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        let b = this.brightness.read(cx).value().start().round() as u8;
+                        this.model.update(cx, |m, cx| m.set_effect(p.spec(b), cx));
+                    })),
+            );
+        }
+        v_flex()
+            .gap_2()
+            .child(grid)
+            .child(
+                h_flex()
+                    .gap_2()
+                    .child(
+                        div()
+                            .w(px(70.))
+                            .text_xs()
+                            .text_color(muted)
+                            .child("Brightness"),
+                    )
+                    .child(
+                        Slider::new(&self.brightness)
+                            .disabled(!live || uploading || !known)
+                            .flex_1(),
+                    )
+                    .child(div().w(px(44.)).text_sm().text_right().child(format!(
+                        "{}%",
+                        self.brightness.read(cx).value().start().round()
+                    ))),
+            )
+            .when(uploading, |d| {
+                d.child(
+                    div()
+                        .text_xs()
+                        .text_color(muted)
+                        .child("Uploading effect… (about 4 s)"),
+                )
+            })
     }
 
     fn render_device(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -189,6 +274,7 @@ impl MainView {
                             })),
                     ),
             )
+            .child(self.render_presets(cx))
             .child(
                 v_flex()
                     .gap_2()
@@ -251,8 +337,7 @@ impl Render for MainView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let body: AnyElement = match self.tab {
             0 => self.render_device(cx).into_any_element(),
-            1 => self.headset_eq.clone().into_any_element(),
-            _ => self.mic_eq.clone().into_any_element(),
+            _ => self.headset_eq.clone().into_any_element(),
         };
         v_flex()
             .size_full()
@@ -265,8 +350,7 @@ impl Render for MainView {
                         .underline()
                         .selected_index(self.tab)
                         .child(Tab::new().label("Device"))
-                        .child(Tab::new().label("Headset EQ"))
-                        .child(Tab::new().label("Mic EQ"))
+                        .child(Tab::new().label("EQ"))
                         .on_click(cx.listener(|this, i: &usize, _, cx| {
                             this.tab = *i;
                             cx.notify();

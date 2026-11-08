@@ -25,6 +25,8 @@ pub struct DeviceModel {
     pub last_error: Option<String>,
     /// Effect stored in lighting slot 1, read once per connection.
     pub effect: Option<Effect>,
+    /// A lighting upload is in flight (~4 s).
+    pub uploading: bool,
     /// Number of in-flight device jobs (for spinners).
     pub busy: usize,
     tray: Option<TrayHandle>,
@@ -55,6 +57,7 @@ impl DeviceModel {
             config,
             last_error: None,
             effect: None,
+            uploading: false,
             busy: 0,
             tray,
             alerts: BatteryAlerts::default(),
@@ -167,6 +170,36 @@ impl DeviceModel {
         F: FnOnce(&Scape) -> scape_hid::Result<()> + Send + 'static,
     {
         self.run(cx, f, |_, _, _| {});
+    }
+
+    /// Upload a lighting effect into slot 1, then refresh the stored-effect readout.
+    pub fn set_effect(&mut self, spec: scape_proto::effects::EffectSpec, cx: &mut Context<Self>) {
+        if self.uploading {
+            return;
+        }
+        self.uploading = true;
+        cx.notify();
+        let worker = self.worker.clone();
+        cx.spawn(async move |this, cx| {
+            let r = worker
+                .call(move |d| {
+                    d.upload_effect(&spec)?;
+                    d.read_effect(1)
+                })
+                .await;
+            let _ = this.update(cx, |m, cx| {
+                m.uploading = false;
+                match r {
+                    Ok(e) => {
+                        m.effect = e;
+                        m.last_error = None;
+                    }
+                    Err(e) => m.last_error = Some(format!("Lighting upload failed: {e}")),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     pub fn set_lights(&mut self, on: bool, cx: &mut Context<Self>) {

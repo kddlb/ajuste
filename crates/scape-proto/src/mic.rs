@@ -1,4 +1,8 @@
 //! Microphone EQ: sent as a dB magnitude table, not as biquad coefficients.
+//!
+//! **Non-functional on firmware 3.48:** the headset stores and returns the table, but recordings
+//! with a strong table showed no change in the USB capture (FINDINGS.md §7). Adjust Pro never
+//! exposes this either. Kept for reference; not used by the CLI or GUI.
 
 use crate::biquad::{self, SampleRate};
 use crate::command::Command;

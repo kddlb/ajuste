@@ -1,4 +1,4 @@
-//! Parametric EQ editor, used for both the headset slots and the microphone.
+//! Parametric EQ editor for the headset's three EQ slots.
 
 use std::time::Duration;
 
@@ -8,17 +8,10 @@ use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::{ActiveTheme, Disableable, Selectable, Sizable, h_flex, v_flex};
 use gpui_kit::*;
 use scape_proto::eq::{self, CommitMode, EqPoint, EqProfile, FilterType};
-use scape_proto::mic::MIC_PRESETS;
 
 use crate::config::UserPreset;
 use crate::curve::response_curve;
 use crate::model::DeviceModel;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EditorKind {
-    Headset,
-    Mic,
-}
 
 /// Debounce for live (non-persistent) previews while dragging.
 const LIVE_DEBOUNCE: Duration = Duration::from_millis(150);
@@ -31,7 +24,6 @@ struct Band {
 
 pub struct EqEditor {
     model: Entity<DeviceModel>,
-    kind: EditorKind,
     slot: u8,
     profile: EqProfile,
     /// UID of the preset the profile came from; cleared once edited.
@@ -44,10 +36,9 @@ pub struct EqEditor {
 }
 
 impl EqEditor {
-    pub fn new(model: Entity<DeviceModel>, kind: EditorKind, cx: &mut Context<Self>) -> Self {
+    pub fn new(model: Entity<DeviceModel>, cx: &mut Context<Self>) -> Self {
         let mut this = EqEditor {
             model,
-            kind,
             slot: 1,
             profile: EqProfile::default(),
             preset_uid: None,
@@ -57,20 +48,7 @@ impl EqEditor {
             live_task: None,
             _subs: Vec::new(),
         };
-        match kind {
-            EditorKind::Headset => this.load_slot(1, false, cx),
-            EditorKind::Mic => {
-                this.status =
-                    Some("The stored mic EQ can't be read back as bands; starting flat.".into());
-                this.set_profile(
-                    EqProfile {
-                        points: MIC_PRESETS[0].points.to_vec(),
-                    },
-                    None,
-                    cx,
-                );
-            }
-        }
+        this.load_slot(1, false, cx);
         this
     }
 
@@ -150,10 +128,7 @@ impl EqEditor {
                             .default_value(v)
                     })
                 };
-                let (gmin, gmax) = match self.kind {
-                    EditorKind::Headset => eq::GAIN_RANGE,
-                    EditorKind::Mic => (-12.0, 12.0),
-                };
+                let (gmin, gmax) = eq::GAIN_RANGE;
                 let band = Band {
                     freq: mk(
                         20.0,
@@ -190,7 +165,7 @@ impl EqEditor {
     /// Called after any user edit.
     fn edited(&mut self, cx: &mut Context<Self>) {
         self.preset_uid = None;
-        if self.kind == EditorKind::Headset && self.connected(cx) {
+        if self.connected(cx) {
             self.schedule_live(cx);
         }
         cx.notify();
@@ -223,7 +198,7 @@ impl EqEditor {
     fn save(&mut self, cx: &mut Context<Self>) {
         let worker = self.worker(cx);
         let profile = self.profile.clone();
-        let (kind, slot) = (self.kind, self.slot);
+        let slot = self.slot;
         let uid = self
             .preset_uid
             .clone()
@@ -232,10 +207,7 @@ impl EqEditor {
         self.status = Some("Saving…".into());
         cx.spawn(async move |this, cx| {
             let r = worker
-                .call(move |d| match kind {
-                    EditorKind::Headset => d.apply_eq(slot, &profile, CommitMode::Save, &uid),
-                    EditorKind::Mic => d.apply_mic_eq(&profile),
-                })
+                .call(move |d| d.apply_eq(slot, &profile, CommitMode::Save, &uid))
                 .await;
             let _ = this.update(cx, |this, cx| {
                 this.status = Some(match r {
@@ -247,21 +219,6 @@ impl EqEditor {
         })
         .detach();
         cx.notify();
-    }
-
-    fn erase_mic(&mut self, cx: &mut Context<Self>) {
-        let worker = self.worker(cx);
-        cx.spawn(async move |this, cx| {
-            let r = worker.call(|d| d.erase_mic_eq()).await;
-            let _ = this.update(cx, |this, cx| {
-                this.status = Some(match r {
-                    Ok(()) => "Mic EQ erased.".into(),
-                    Err(e) => format!("Erase failed: {e}"),
-                });
-                cx.notify();
-            });
-        })
-        .detach();
     }
 
     fn save_as_preset(&mut self, cx: &mut Context<Self>) {
@@ -305,8 +262,8 @@ impl EqEditor {
     fn render_presets(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let mut row = h_flex().gap_1().flex_wrap();
         let current = self.preset_uid.clone();
-        match self.kind {
-            EditorKind::Headset => {
+        {
+            {
                 for p in eq::PRESETS {
                     let profile = p.profile();
                     let uid = p.uid.to_string();
@@ -342,21 +299,6 @@ impl EqEditor {
                     );
                 }
             }
-            EditorKind::Mic => {
-                for p in MIC_PRESETS {
-                    let profile = EqProfile {
-                        points: p.points.to_vec(),
-                    };
-                    row = row.child(
-                        Button::new(SharedString::from(format!("mic-{}", p.name)))
-                            .label(p.name)
-                            .small()
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.set_profile(profile.clone(), None, cx);
-                            })),
-                    );
-                }
-            }
         }
         row
     }
@@ -364,15 +306,7 @@ impl EqEditor {
     fn render_band(&self, i: usize, band: &Band, cx: &mut Context<Self>) -> impl IntoElement {
         let p = self.profile.points[i];
         let muted = cx.theme().muted_foreground;
-        let types: &[FilterType] = match self.kind {
-            EditorKind::Headset => &FilterType::EDITOR,
-            EditorKind::Mic => &[
-                FilterType::Peak,
-                FilterType::LowShelf,
-                FilterType::HighShelf,
-                FilterType::LowPass,
-            ],
-        };
+        let types: &[FilterType] = &FilterType::EDITOR;
         let mut type_row = h_flex().gap_1();
         for &t in types {
             type_row = type_row.child(
@@ -429,7 +363,7 @@ impl Render for EqEditor {
         let connected = self.connected(cx);
         let mut root = v_flex().gap_3();
 
-        if self.kind == EditorKind::Headset {
+        {
             let active = self.model.read(cx).headset().map(|h| h.eq_slot);
             root = root.child(
                 h_flex()
@@ -489,51 +423,37 @@ impl Render for EqEditor {
                 Button::new("save")
                     .primary()
                     .small()
-                    .label(if self.kind == EditorKind::Headset {
-                        format!("Save to slot {}", self.slot)
-                    } else {
-                        "Save mic EQ".into()
-                    })
+                    .label(format!("Save to slot {}", self.slot))
                     .disabled(!connected || self.loading)
                     .on_click(cx.listener(|this, _, _, cx| this.save(cx))),
             );
-        actions = match self.kind {
-            EditorKind::Headset => actions
-                .child(
-                    Button::new("save-preset")
-                        .small()
-                        .label("Save as preset")
-                        .on_click(cx.listener(|this, _, _, cx| this.save_as_preset(cx))),
-                )
-                .child(
-                    Button::new("revert")
-                        .small()
-                        .ghost()
-                        .label("Revert")
-                        .disabled(!connected)
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            let slot = this.slot;
-                            this.live_task = None;
-                            this.load_slot(slot, true, cx)
-                        })),
-                ),
-            EditorKind::Mic => actions.child(
-                Button::new("erase-mic")
+        actions = actions
+            .child(
+                Button::new("save-preset")
                     .small()
-                    .danger()
-                    .label("Erase")
+                    .label("Save as preset")
+                    .on_click(cx.listener(|this, _, _, cx| this.save_as_preset(cx))),
+            )
+            .child(
+                Button::new("revert")
+                    .small()
+                    .ghost()
+                    .label("Revert")
                     .disabled(!connected)
-                    .on_click(cx.listener(|this, _, _, cx| this.erase_mic(cx))),
-            ),
-        };
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        let slot = this.slot;
+                        this.live_task = None;
+                        this.load_slot(slot, true, cx)
+                    })),
+            );
         root = root.child(actions);
 
-        let hint = match (self.kind, self.loading) {
-            (_, true) => Some("Reading slot…".to_string()),
-            (EditorKind::Headset, false) if connected => {
-                Some("Edits play live on the headset; they are kept only after Save.".to_string())
-            }
-            _ => None,
+        let hint = if self.loading {
+            Some("Reading slot…".to_string())
+        } else if connected {
+            Some("Edits play live on the headset; they are kept only after Save.".to_string())
+        } else {
+            None
         };
         for line in [self.status.clone(), hint].into_iter().flatten() {
             root = root.child(
