@@ -352,7 +352,22 @@ fn load_profile(src: &ProfileSource) -> Result<(EqProfile, String)> {
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_default();
-    Ok((p, format!("custom-{stem}").chars().take(54).collect()))
+    Ok((
+        p,
+        truncate_bytes(format!("custom-{stem}"), eq::MAX_PRESET_UID_LEN),
+    ))
+}
+
+/// Cut `s` to at most `max` bytes without splitting a UTF-8 character.
+fn truncate_bytes(mut s: String, max: usize) -> String {
+    if s.len() > max {
+        let mut end = max;
+        while !s.is_char_boundary(end) {
+            end -= 1;
+        }
+        s.truncate(end);
+    }
+    s
 }
 
 fn read_toml(path: &PathBuf) -> Result<EqProfile> {
@@ -442,5 +457,18 @@ fn confirm(dev: &Scape, ok: impl Fn(&scape_proto::HeadsetState) -> bool, what: &
         Ok(())
     } else {
         bail!("{what}: command sent but device state did not change ({st:?})")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::truncate_bytes;
+
+    #[test]
+    fn truncates_on_char_boundary() {
+        let s = format!("{}ñ", "a".repeat(53)); // 55 bytes
+        let t = truncate_bytes(s, 54);
+        assert_eq!(t, "a".repeat(53));
+        assert_eq!(truncate_bytes("short".into(), 54), "short");
     }
 }

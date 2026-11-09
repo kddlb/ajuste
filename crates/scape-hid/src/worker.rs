@@ -5,7 +5,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::device::{Scape, Status};
-use crate::transport::DeviceKind;
+use crate::transport::{DeviceKind, Transport};
 use crate::{Error, POLL_INTERVAL, Result};
 
 #[derive(Debug, Clone)]
@@ -78,6 +78,9 @@ fn run(jobs: mpsc::Receiver<Job>, events: async_channel::Sender<DeviceEvent>) {
     let mut dev: Option<Scape> = None;
     let mut last_err = String::new();
     let mut next_poll = Instant::now();
+    // While the dongle reports no headset, look now and then for one plugged in over USB.
+    const WIRED_PROBE_INTERVAL: Duration = Duration::from_secs(5);
+    let mut next_wired_probe = Instant::now();
 
     loop {
         if dev.is_none() && Instant::now() >= next_poll {
@@ -121,8 +124,19 @@ fn run(jobs: mpsc::Receiver<Job>, events: async_channel::Sender<DeviceEvent>) {
         if let Some(d) = &dev {
             match d.status() {
                 Ok(s) => {
+                    let away_on_dongle = s.kind == DeviceKind::Dongle && s.headset.is_none();
                     if events.send_blocking(DeviceEvent::Status(s)).is_err() {
                         return; // nobody listening
+                    }
+                    if away_on_dongle && Instant::now() >= next_wired_probe {
+                        next_wired_probe = Instant::now() + WIRED_PROBE_INTERVAL;
+                        if Transport::wired_headset_present() {
+                            // Reopen: `Scape::open` prefers the wired headset.
+                            log::info!("headset found on USB; switching from the dongle");
+                            dev = None;
+                            next_poll = Instant::now();
+                            continue;
+                        }
                     }
                 }
                 Err(Error::Timeout(_)) => log::debug!("status poll timed out"),

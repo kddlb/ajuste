@@ -89,9 +89,25 @@ impl DeviceModel {
         }
     }
 
+    /// Change the config and persist it; a failure (e.g. an unparsable hand-edited file,
+    /// which is never overwritten) is shown as `last_error`.
+    pub fn update_config(&mut self, cx: &mut Context<Self>, f: impl FnOnce(&mut Config)) {
+        if let Err(e) = self.config.update(f) {
+            log::warn!("{e}");
+            self.last_error = Some(e);
+        }
+        cx.notify();
+    }
+
     /// Remember that ajuste is about to cause a `kind` change (window or tray action).
+    /// At most one pending expectation per kind: repeated requests (e.g. one per slider
+    /// event) only refresh it, so leftovers can't hide later changes made on the headset.
     pub fn expect(&mut self, kind: Kind) {
-        self.expected.push((kind, Instant::now()));
+        let now = Instant::now();
+        match self.expected.iter_mut().find(|(k, _)| *k == kind) {
+            Some(e) => e.1 = now,
+            None => self.expected.push((kind, now)),
+        }
     }
 
     /// True if this change was caused by ajuste within the last few seconds (consumes it).
@@ -295,18 +311,27 @@ impl DeviceModel {
         .detach();
     }
 
+    // Only expect a change when the request actually changes something; a no-op request
+    // would otherwise swallow a real headset-side change for the next few seconds.
+
     pub fn set_lights(&mut self, on: bool, cx: &mut Context<Self>) {
-        self.expect(Kind::Lights);
+        if self.headset().is_some_and(|h| (h.lighting_slot != 0) != on) {
+            self.expect(Kind::Lights);
+        }
         self.exec(cx, move |d| d.set_lights(on));
     }
 
     pub fn set_enc(&mut self, on: bool, cx: &mut Context<Self>) {
-        self.expect(Kind::Enc);
+        if self.headset().is_some_and(|h| h.enc_on != on) {
+            self.expect(Kind::Enc);
+        }
         self.exec(cx, move |d| d.set_enc(on));
     }
 
     pub fn select_eq(&mut self, slot: u8, cx: &mut Context<Self>) {
-        self.expect(Kind::EqSlot);
+        if self.headset().is_some_and(|h| h.eq_slot != slot) {
+            self.expect(Kind::EqSlot);
+        }
         self.exec(cx, move |d| d.select_eq(slot));
     }
 

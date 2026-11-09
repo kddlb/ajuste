@@ -32,7 +32,20 @@ pub struct Transport {
 }
 
 impl Transport {
-    /// Find and open the P911 interface (vendor usage page 0xFF00).
+    /// True if a headset plugged in over USB exposes its P911 interface right now.
+    pub fn wired_headset_present() -> bool {
+        HidApi::new().is_ok_and(|api| {
+            api.device_list().any(|d| {
+                d.vendor_id() == VID_FRACTAL
+                    && d.product_id() == PID_HEADSET_USB
+                    && d.usage_page() == USAGE_PAGE_P911
+            })
+        })
+    }
+
+    /// Find and open the P911 interface (vendor usage page 0xFF00). A headset on USB is
+    /// preferred over the dongle: it always reaches the headset, while the dongle only does
+    /// over the radio link.
     pub fn open() -> Result<Self> {
         let api = HidApi::new()?;
         let info = api
@@ -40,8 +53,9 @@ impl Transport {
             .filter(|d| {
                 d.vendor_id() == VID_FRACTAL
                     && matches!(d.product_id(), PID_DONGLE | PID_HEADSET_USB)
+                    && d.usage_page() == USAGE_PAGE_P911
             })
-            .find(|d| d.usage_page() == USAGE_PAGE_P911)
+            .min_by_key(|d| d.product_id() != PID_HEADSET_USB)
             .ok_or(Error::NotFound)?;
         let path = info.path().to_string_lossy().into_owned();
         let kind = if info.product_id() == PID_DONGLE {

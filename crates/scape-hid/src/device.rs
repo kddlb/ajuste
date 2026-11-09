@@ -62,6 +62,11 @@ impl Scape {
     }
 
     pub fn run(&self, cmds: &[Command]) -> Result<()> {
+        // Encode everything first so an invalid command fails before any of the sequence
+        // reaches the device, instead of leaving it half-applied.
+        for c in cmds {
+            c.encode()?;
+        }
         for c in cmds {
             self.send(c)?;
         }

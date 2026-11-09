@@ -113,17 +113,47 @@ impl Config {
         }
     }
 
-    pub fn save(&self) {
-        let Some(p) = path() else { return };
+    /// Apply `f` and persist it without clobbering the file: the change is applied on top of
+    /// what is on disk *now*, so hand edits made while ajuste runs survive (and are picked up).
+    /// If the file exists but doesn't parse, it is left untouched and an error is returned;
+    /// the change still applies in memory for this session.
+    pub fn update(&mut self, f: impl FnOnce(&mut Config)) -> Result<(), String> {
+        let Some(p) = path() else {
+            f(self);
+            return Ok(());
+        };
+        let mut base = match std::fs::read_to_string(&p) {
+            Ok(s) => match toml::from_str::<Config>(&s) {
+                Ok(disk) => disk,
+                Err(e) => {
+                    f(self);
+                    return Err(format!(
+                        "{} has errors, so ajuste won't overwrite it (fix or delete it): {e}",
+                        p.display()
+                    ));
+                }
+            },
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => self.clone(),
+            Err(e) => {
+                f(self);
+                return Err(format!("could not read {}: {e}", p.display()));
+            }
+        };
+        f(&mut base);
+        *self = base;
         let res = p
             .parent()
             .map(std::fs::create_dir_all)
             .transpose()
             .map_err(anyhow::Error::from)
             .and_then(|_| Ok(toml::to_string_pretty(self)?))
-            .and_then(|s| Ok(std::fs::write(&p, s)?));
-        if let Err(e) = res {
-            log::warn!("could not save {}: {e}", p.display());
-        }
+            .and_then(|s| {
+                // Write-then-rename so a crash mid-write can't truncate the file.
+                let tmp = p.with_extension("toml.tmp");
+                std::fs::write(&tmp, s)?;
+                std::fs::rename(&tmp, &p)?;
+                Ok(())
+            });
+        res.map_err(|e| format!("could not save {}: {e}", p.display()))
     }
 }

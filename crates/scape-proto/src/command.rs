@@ -242,7 +242,7 @@ impl Command {
             } => {
                 eq::check_slot(*profile_id)?;
                 let uid = preset_uid.as_bytes();
-                if uid.len() > PAYLOAD_LEN - 9 {
+                if uid.len() > eq::MAX_PRESET_UID_LEN {
                     return Err(ProtoError::OutOfRange("preset uid too long"));
                 }
                 p.extend([*profile_id, *mode as u8]);

@@ -1,5 +1,7 @@
 //! Parametric EQ editor for the headset's three EQ slots.
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use gpui_kit::component::button::{Button, ButtonVariants};
@@ -30,9 +32,19 @@ pub struct EqEditor {
     preset_uid: Option<String>,
     status: Option<String>,
     loading: bool,
+    /// Slot the shown profile belongs to: set by a successful read, or when the user picks a
+    /// whole preset for the current slot. Save is only allowed when it equals `slot`, so a
+    /// stale or failed read can never be written into another slot.
+    profile_slot: Option<u8>,
+    /// Bumped per `load_slot`; replies from superseded reads are ignored.
+    load_gen: u64,
+    /// Bumped per live preview (and by Save/Revert). A queued preview job checks it when the
+    /// worker actually runs it and skips itself if a newer one exists.
+    live_gen: Arc<AtomicU64>,
     bands: Vec<Band>,
     live_task: Option<Task<()>>,
     _subs: Vec<Subscription>,
+    _model_sub: Option<Subscription>,
 }
 
 impl EqEditor {
@@ -44,12 +56,32 @@ impl EqEditor {
             preset_uid: None,
             status: None,
             loading: false,
+            profile_slot: None,
+            load_gen: 0,
+            live_gen: Arc::new(AtomicU64::new(0)),
             bands: Vec::new(),
             live_task: None,
             _subs: Vec::new(),
+            _model_sub: None,
         };
+        // (Re)read the slot whenever the headset becomes reachable and the shown profile isn't
+        // known to belong to it (e.g. the window opened while the headset was off).
+        let mut was_ready = this.connected(cx);
+        this._model_sub = Some(cx.observe(&this.model, move |this, _, cx| {
+            let ready = this.connected(cx);
+            if ready && !was_ready && !this.loading && this.profile_slot != Some(this.slot) {
+                this.load_slot(this.slot, false, cx);
+            }
+            was_ready = ready;
+        }));
         this.load_slot(1, false, cx);
         this
+    }
+
+    /// Invalidate any live preview that is scheduled or queued on the worker.
+    fn cancel_live(&mut self) {
+        self.live_task = None;
+        self.live_gen.fetch_add(1, Ordering::SeqCst);
     }
 
     fn worker(&self, cx: &App) -> scape_hid::WorkerHandle {
@@ -66,6 +98,8 @@ impl EqEditor {
         self.slot = slot;
         self.loading = true;
         self.status = None;
+        self.load_gen += 1;
+        let load_gen = self.load_gen;
         let worker = self.worker(cx);
         cx.spawn(async move |this, cx| {
             let r = worker
@@ -79,10 +113,11 @@ impl EqEditor {
                 })
                 .await;
             let _ = this.update(cx, |this, cx| {
-                this.loading = false;
-                if this.slot != slot {
+                // A newer read (another tab click, Revert, reconnect) owns `loading` now.
+                if this.load_gen != load_gen {
                     return;
                 }
+                this.loading = false;
                 match r {
                     Ok(s) => {
                         if s.factory_copy {
@@ -90,6 +125,7 @@ impl EqEditor {
                                 Some("Slot is empty; showing the factory default.".into());
                         }
                         this.set_profile(s.profile, s.preset_uid, cx);
+                        this.profile_slot = Some(slot);
                     }
                     Err(e) => {
                         this.status = Some(format!("Could not read slot {slot}: {e}"));
@@ -179,11 +215,18 @@ impl EqEditor {
             self.model
                 .update(cx, |m, _| m.expect(crate::notify::Kind::EqSlot));
         }
-        // Dropping the previous task cancels it: only the last edit in the window is sent.
+        // Dropping the previous task cancels a preview still in its debounce window; the
+        // generation check drops one that already reached the worker queue. Either way only
+        // the newest edit is sent.
+        let live_gen = self.live_gen.clone();
+        let my_gen = live_gen.fetch_add(1, Ordering::SeqCst) + 1;
         self.live_task = Some(cx.spawn(async move |this, cx| {
             cx.background_executor().timer(LIVE_DEBOUNCE).await;
             let r = worker
                 .call(move |d| {
+                    if live_gen.load(Ordering::SeqCst) != my_gen {
+                        return Ok(()); // superseded while queued
+                    }
                     if active != Some(slot) {
                         d.select_eq(slot)?;
                     }
@@ -200,6 +243,10 @@ impl EqEditor {
     }
 
     fn save(&mut self, cx: &mut Context<Self>) {
+        if self.profile_slot != Some(self.slot) {
+            return;
+        }
+        self.cancel_live();
         let worker = self.worker(cx);
         let profile = self.profile.clone();
         let slot = self.slot;
@@ -229,10 +276,11 @@ impl EqEditor {
         let points = self.profile.points.clone();
         let uid = uuid::Uuid::new_v4().to_string();
         self.preset_uid = Some(uid.clone());
-        self.model.update(cx, |m, _| {
-            let name = format!("Custom {}", m.config.presets.len() + 1);
-            m.config.presets.push(UserPreset { name, uid, points });
-            m.config.save();
+        self.model.update(cx, |m, cx| {
+            m.update_config(cx, move |c| {
+                let name = format!("Custom {}", c.presets.len() + 1);
+                c.presets.push(UserPreset { name, uid, points });
+            });
         });
         cx.notify();
     }
@@ -278,6 +326,7 @@ impl EqEditor {
                             .selected(current.as_deref() == Some(p.uid))
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.set_profile(profile.clone(), Some(uid.clone()), cx);
+                                this.profile_slot = Some(this.slot);
                                 if this.connected(cx) {
                                     this.schedule_live(cx);
                                 }
@@ -296,6 +345,7 @@ impl EqEditor {
                             .selected(selected)
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.set_profile(profile.clone(), Some(p.uid.clone()), cx);
+                                this.profile_slot = Some(this.slot);
                                 if this.connected(cx) {
                                     this.schedule_live(cx);
                                 }
@@ -428,7 +478,7 @@ impl Render for EqEditor {
                     .primary()
                     .small()
                     .label(format!("Save to slot {}", self.slot))
-                    .disabled(!connected || self.loading)
+                    .disabled(!connected || self.loading || self.profile_slot != Some(self.slot))
                     .on_click(cx.listener(|this, _, _, cx| this.save(cx))),
             );
         actions = actions
@@ -446,7 +496,7 @@ impl Render for EqEditor {
                     .disabled(!connected)
                     .on_click(cx.listener(|this, _, _, cx| {
                         let slot = this.slot;
-                        this.live_task = None;
+                        this.cancel_live();
                         this.load_slot(slot, true, cx)
                     })),
             );

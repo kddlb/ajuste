@@ -7,6 +7,7 @@ mod eq_editor;
 mod main_view;
 mod model;
 mod notify;
+mod single_instance;
 mod tray;
 
 use gpui_kit::*;
@@ -90,11 +91,15 @@ fn main() {
     )
     .init();
     let args = parse_args();
+    let Some(instance) = single_instance::claim(args.hidden) else {
+        return; // another ajuste is running; it was asked to show its window
+    };
     let config = Config::load();
     let hidden = args.hidden || config.start_hidden;
 
     let (worker, events) = scape_hid::Worker::spawn();
     let (app_tx, app_rx) = async_channel::unbounded::<AppMsg>();
+    instance.listen(app_tx.clone());
     let tray = tray::spawn(app_tx);
     let has_tray = tray.is_some();
 

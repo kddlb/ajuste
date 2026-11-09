@@ -42,23 +42,35 @@ impl MainView {
         let headset_eq = cx.new(|cx| EqEditor::new(model.clone(), cx));
 
         let subs = vec![
-            // Keep the sidetone slider in sync with polled state unless the user is dragging.
-            cx.observe_in(&model, window, |this, model, window, cx| {
-                if let Some(h) = model.read(cx).headset() {
-                    let pct = h.sidetone_pct() as f32;
-                    if this.sidetone.read(cx).value().start() != pct {
+            // Follow the device values, but only when they actually change: model notifies
+            // arrive on every poll, and resyncing then would yank a slider out from under a
+            // drag in progress.
+            cx.observe_in(&model, window, {
+                let mut last_sidetone: Option<f32> = None;
+                let mut last_brightness: Option<f32> = None;
+                move |this, model, window, cx| {
+                    let pct = model.read(cx).headset().map(|h| h.sidetone_pct() as f32);
+                    if let Some(pct) = pct
+                        && last_sidetone != Some(pct)
+                    {
+                        last_sidetone = Some(pct);
                         this.sidetone
                             .update(cx, |s, cx| s.set_value(pct, window, cx));
                     }
-                }
-                if let Some(e) = &model.read(cx).effect {
-                    let b = f32::from(e.brightness);
-                    if this.brightness.read(cx).value().start() != b {
+                    let b = model
+                        .read(cx)
+                        .effect
+                        .as_ref()
+                        .map(|e| f32::from(e.brightness));
+                    if let Some(b) = b
+                        && last_brightness != Some(b)
+                    {
+                        last_brightness = Some(b);
                         this.brightness
                             .update(cx, |s, cx| s.set_value(b, window, cx));
                     }
+                    cx.notify();
                 }
-                cx.notify();
             }),
             cx.subscribe(&sidetone, |this, _, ev: &SliderEvent, cx| {
                 if let SliderEvent::Release(v) = ev {
@@ -242,9 +254,7 @@ impl MainView {
                         .on_click(cx.listener(move |this, on: &bool, _, cx| {
                             let on = *on;
                             this.model.update(cx, |m, cx| {
-                                m.config.notifications.set(kind, on);
-                                m.config.save();
-                                cx.notify();
+                                m.update_config(cx, |c| c.notifications.set(kind, on));
                             });
                         })),
                 )

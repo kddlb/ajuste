@@ -2,7 +2,10 @@
 
 use crate::biquad::{self, Coefs, SampleRate};
 use crate::command::Command;
-use crate::{ProtoError, Result};
+use crate::{PAYLOAD_LEN, ProtoError, Result};
+
+/// Longest preset UID (in bytes) that fits the COMMIT_EQ payload.
+pub const MAX_PRESET_UID_LEN: usize = PAYLOAD_LEN - 9;
 
 pub const MAX_POINTS: usize = 5;
 pub const SLOTS: u8 = 3;
@@ -224,6 +227,11 @@ impl EqProfile {
     ) -> Result<Vec<Command>> {
         self.validate()?;
         check_slot(slot)?;
+        // Checked up front: failing at COMMIT_EQ would leave settings and coefficients
+        // already sent but uncommitted.
+        if preset_uid.len() > MAX_PRESET_UID_LEN {
+            return Err(ProtoError::OutOfRange("preset uid too long (max 54 bytes)"));
+        }
         let mut cmds = vec![Command::SetEqSettings {
             profile_id: slot,
             profile: self.clone(),
