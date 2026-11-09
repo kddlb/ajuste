@@ -1,0 +1,21 @@
+[package]
+name = "ajuste"
+description = "Fractal Scape headset control panel (gpui-kit)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+scape-proto.workspace = true
+scape-hid.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+log.workspace = true
+gpui-kit = "0.9"
+ksni = { version = "0.3", features = ["blocking"] }
+notify-rust = "4.19"
+toml = "0.9"
+directories = "6"
+uuid = { version = "1", features = ["v4"] }
+env_logger = "0.11"
+async-channel = "2.5"

@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Ajuste
+GenericName=Headset Settings
+Comment=Battery, EQ, lighting, sidetone and noise cancellation for the Fractal Scape headset
+Exec=ajuste
+Icon=audio-headphones
+Terminal=false
+Categories=Settings;HardwareSettings;
+Keywords=headset;headphones;fractal;scape;equalizer;battery;rgb;
+StartupWMClass=ajuste

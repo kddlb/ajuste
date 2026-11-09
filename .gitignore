@@ -1,0 +1,8 @@
+/target
+# Fractal Adjust Pro web-app bundle and extracts: third-party code, kept locally only.
+/reference/*.js
+# makepkg output when building in packaging/arch/*/
+/packaging/arch/*/*.pkg.tar*
+/packaging/arch/*/src/
+/packaging/arch/*/pkg/
+/packaging/arch/*/ajuste/
